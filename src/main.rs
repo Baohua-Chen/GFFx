@@ -7,8 +7,13 @@ use gffx::extract;
 use gffx::search;
 
 #[derive(Parser)]
-#[command(name = "gffx", version, about = "A ultra-fast feature extractor for GFF files")]
-#[command(about = "GFF file utility", long_about = None)]
+#[command(
+    name = "gffx",
+    version,
+    about = concat!("GFFx: A ultra-fast feature extractor for GFF files\nVersion: ", env!("CARGO_PKG_VERSION")),
+    propagate_version = true
+)]
+
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -24,7 +29,8 @@ enum Commands {
 }
 
 fn main() -> Result<()> {
-    match Cli::parse().command {
+    let cli = Cli::parse();
+    match cli.command {
         Commands::Index(args) => gffx::index::run(&args)?,
  //       Commands::Sort(args) => gffx::sort::run(&args)?,
         Commands::Intersect(args) => gffx::intersect::run(&args)?,

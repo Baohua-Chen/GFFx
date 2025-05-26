@@ -18,7 +18,7 @@ It can be used both as a **command-line tool** and as a **Rust library**.
 - [Using GFFx as a Rust Library](#using-gffx-as-a-rust-library)
 - [Index File Types](#index-file-types)
 - [License](#license)
-- [Notes(#notes)
+- [Notes](#notes)
 
 ---
 
