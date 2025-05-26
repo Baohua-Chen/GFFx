@@ -25,16 +25,17 @@ Available subcommands:
 Builds index files from a GFF file to accelerate downstream operations.
 
 ```bash
-gffx index -i input.gff -a gene_name
+gffx index [OPTIONS] --input <INPUT>
 ```
 
 **Options:**
 
-| Option                 | Description                                |
-|------------------------|--------------------------------------------|
-| `-i`, `--input`        | Input GFF file                             |
+| Option                 | Description                                     |
+|------------------------|-------------------------------------------------|
+| `-i`, `--input`        | Input GFF file                                  |
 | `-a`, `--attribute`    | Attribute key to extract (default: `gene_name`) |
-| `--verbose`            | Enable verbose output                      |
+| `-v`, `--verbose`      | Enable verbose output                           |
+| `-h`, `--help   `      | Print help                                      |
 
 ---
 
@@ -43,18 +44,30 @@ gffx index -i input.gff -a gene_name
 Extracts models intersecting with regions from a GFF file, either from a single region or a BED file.
 
 ```bash
-gffx intersect --bed regions.bed --mode overlap -i input.gff
+gffx intersect [OPTIONS] --input <INPUT> <--region <REGION>|--bed <BED>>
 ```
 
 **Options:**
+Required
+| Option                      | Description                                                  |
+| --------------------------- | ------------------------------------------------------------ |
+| `-i`, `--input` `<INPUT>`   | Input GFF file path                                          |
+| *(one of)*                  |                                                              |
+| `-r`, `--region` `<REGION>` | Single region in `chr:start-end` format                      |
+| `-b`, `--bed` `<BED>`       | BED file containing multiple regions                         |
 
-| Option                  | Description                                |
-|--------------------------|--------------------------------------------|
-| `--region`               | Single region, e.g., `chr1:1000-2000`      |
-| `--bed`                  | BED file with multiple regions             |
-| `--mode`                 | Match mode: `overlap`, `contains_region`, or `contained` |
-| `-i`, `--input`          | Input GFF file                             |
-| `-o`, `--output`         | Output GFF file path                       |
+Optional
+| Option                      | Description                                                  |
+| -------------------------   | ------------------------------------------------------------ |
+| `-o`, `--out` `<OUT>`       | Output file path (default: stdout)                           |
+| `-T`, `--types` `<TYPES>`   | Comma-separated feature types to retain (e.g., `gene,exon`)  |
+| `-t`, `--threads` `<N>`     | Number of threads to use (default: 4)                        |
+| `-c`, `--contained`         | Only keep features fully contained within the region         |
+| `-C`, `--contains-region`   | Only keep features that fully contain the region             |
+| `-O`, `--overlap`           | Keep features that partially or fully overlap (default mode) |
+| `-v`, `--invert`            | Invert selection (exclude matched features)                  |
+| `-V`, `--verbose`           | Enable verbose output                                        |
+| `-h`, `--help`              | Show help message                                            |
 
 ---
 
