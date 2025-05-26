@@ -80,9 +80,12 @@ Required
 | Option                      | Description                                                  |
 | --------------------------- | ------------------------------------------------------------ |
 | `-i`, `--input` `<INPUT>`   | Input GFF file path                                          |
-| *(one of)*                                                                                 |
+| *(one of)*                  |                                                              |
 | `-r`, `--region` `<REGION>` | Single region in `chr:start-end` format                      |
 | `-b`, `--bed` `<BED>`       | BED file containing multiple regions                         |
+
+> **Note**: Exactly one of `--region` or `--bed` must be specified.
+
 
 Optional
 | Option                      | Description                                                                    |
