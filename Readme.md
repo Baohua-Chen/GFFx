@@ -6,7 +6,7 @@ It can be used both as a **command-line tool** and as a **Rust library**.
 
 ## Table of Contents
 
-*GFFx version 0.1.0*
+*GFFx version 0.1.1*
 
 - [Installation](#installation)
 - [Basic Usage](#basic-usage)
@@ -183,7 +183,7 @@ You can use GFFx as a Rust library in your own project.
 
 ```toml
 [dependencies]
-gffx = "0.1.0"
+gffx = "0.1.1"
 ```
 
 ### Example: Manually extract features from region using index files

@@ -1,6 +1,6 @@
 [package]
 name = "gffx"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 authors = ["Baohua Chen <cbh1117.163.com>"]
 description = "An ultra-fast and memory-efficient toolkit for querying GFF files, written with Rust"
@@ -11,6 +11,7 @@ homepage = "https://github.com/Baohua-Chen"
 keywords = ["gff-file", "bioinformatics", "genomics"]
 categories = ["command-line-utilities", "science"]
 documentation = "https://docs.rs/gffx"
+exclude = ["tests/", "benchmark/", "target"]
 
 [dependencies]
 regex = "1.11.1"
