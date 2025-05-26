@@ -1,0 +1,20 @@
+[package]
+name = "gffx"
+version = "0.1.0"
+edition = "2024"
+authors = ["chenbaohua <cbh1117.163.com>"]
+description = "An ultra-fast and memory-efficient toolkit for querying GFF files, written with Rust"
+license = "MIT OR Apache-2.0"
+keywords = ["gff", "bioinformatics", "genomics", "binning index", ""]
+categories = ["command-line-utilities", "science"]
+
+
+[dependencies]
+regex = "1.11.1"
+clap = { version = "4.5.37", features = ["derive"] }
+anyhow = "1.0.98"
+byteorder = "1.5.0"
+memmap2 = "0.9.5"
+libc = "0.2.172"
+rayon = '1.10.0'
+rand = '0.9.1'

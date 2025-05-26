@@ -1,0 +1,35 @@
+use clap::{Parser, Subcommand};
+use anyhow::Result;
+use gffx::index;
+//use gffx::sort;
+use gffx::intersect;
+use gffx::extract;
+use gffx::search;
+
+#[derive(Parser)]
+#[command(name = "gffx")]
+#[command(about = "GFF file utility", long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    Index(index::IndexArgs),
+//    Sort(sort::SortArgs),
+    Intersect(intersect::IntersectArgs),
+    Extract(extract::ExtractArgs),
+    Search(search::SearchArgs),
+}
+
+fn main() -> Result<()> {
+    match Cli::parse().command {
+        Commands::Index(args) => gffx::index::run(&args)?,
+ //       Commands::Sort(args) => gffx::sort::run(&args)?,
+        Commands::Intersect(args) => gffx::intersect::run(&args)?,
+        Commands::Extract(args) => gffx::extract::run(&args)?,
+        Commands::Search(args) => gffx::search::run(&args)?,
+    }
+    Ok(())
+}
