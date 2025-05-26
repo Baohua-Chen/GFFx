@@ -2,12 +2,15 @@
 name = "gffx"
 version = "0.1.0"
 edition = "2024"
-authors = ["chenbaohua <cbh1117.163.com>"]
+authors = ["Baohua Chen <cbh1117.163.com>"]
 description = "An ultra-fast and memory-efficient toolkit for querying GFF files, written with Rust"
 license = "MIT OR Apache-2.0"
-keywords = ["gff", "bioinformatics", "genomics", "binning index", ""]
+readme = "Readme.md"
+repository = "https://github.com/Baohua-Chen/GFFx"
+homepage = "https://github.com/Baohua-Chen"
+keywords = ["gff-file", "bioinformatics", "genomics"]
 categories = ["command-line-utilities", "science"]
-
+documentation = "https://docs.rs/gffx"
 
 [dependencies]
 regex = "1.11.1"
