@@ -122,7 +122,7 @@ pub fn run(args: &SearchArgs) -> Result<()> {
         })
         .collect::<Result<Vec<_>>>()?;
 
-    let out: Box<dyn Write> = match &args.common.out {
+    let out: Box<dyn Write> = match &args.common.output {
         Some(path) => Box::new(File::create(path)?),
         None => Box::new(std::io::stdout()),
     };

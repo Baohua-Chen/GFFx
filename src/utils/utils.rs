@@ -22,7 +22,7 @@ pub struct CommonArgs {
 
     /// Output file (stdout if not provided)
     #[arg(short, long)]
-    pub out: Option<PathBuf>,
+    pub output: Option<PathBuf>,
 
     /// Comma-separated feature types to retain (e.g. exon,gene)
     #[arg(short = 'T', long = "types")]

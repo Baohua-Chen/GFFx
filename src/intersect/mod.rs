@@ -159,7 +159,7 @@ pub fn run(args: &IntersectArgs) -> Result<()> {
         Some((label.clone(), offsets))
     }).collect();
 
-    let mut writer: Box<dyn Write> = match &args.common.out {
+    let mut writer: Box<dyn Write> = match &args.common.output {
         Some(path) => Box::new(File::create(path)?),
         None => Box::new(stdout()),
     };

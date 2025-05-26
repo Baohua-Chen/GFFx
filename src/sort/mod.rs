@@ -94,7 +94,7 @@ pub fn run(args: &SortArgs) -> Result<()> {
     write_gff_output(
         gff_buf,
         &blocks,
-        &args.common.out,
+        &args.common.output,
         args.common.types.as_deref(),
         args.common.verbose,
     )?;

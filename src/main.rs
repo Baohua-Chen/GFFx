@@ -7,7 +7,7 @@ use gffx::extract;
 use gffx::search;
 
 #[derive(Parser)]
-#[command(name = "gffx")]
+#[command(name = "gff_seeker")]
 #[command(about = "GFF file utility", long_about = None)]
 struct Cli {
     #[command(subcommand)]
