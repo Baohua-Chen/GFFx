@@ -101,7 +101,7 @@ Optional
 | `-h`, `--help`              | Show help message                                                              |
 ---
 
-## 🔍 `search`: Search Features by Attribute
+## `search`: Search Features by Attribute
 
 Searches for features using a specified attribute value and retrieves the full annotation models.
 
