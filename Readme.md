@@ -25,7 +25,8 @@ It can be used both as a **command-line tool** and as a **Rust library**.
 ## Installation
 
 ```bash
-cargo install gffx
+cargo install gffx   # install to default location (~/.cargo/bin)
+cargo install gffx --root /your/target/directory   # optional custom path
 ```
 
 Requires Rust >= 1.70.
