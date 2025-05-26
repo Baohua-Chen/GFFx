@@ -2,6 +2,33 @@
 # GFFx Command Line Manual
 
 **GFFx** is a high-performance, Rust-based toolkit for extracting and querying annotations from GFF3 files. It supports fast indexing and feature retrieval with several subcommands.
+It can be used both as a **command-line tool** and as a **Rust library**.
+
+## Table of Contents
+
+*GFFx version 0.1.0*
+
+- [Installation](#installation)
+- [Basic Usage](#basic-usage)
+  - [index](#index) - Build index files
+  - [extract](#extract) - Extract features by ID
+  - [intersect](#intersect) - Extract features by regions
+  - [search](#search) - Search features by attributes
+- [Example Use Cases](#example-use-cases)
+- [Using GFFx as a Rust Library](#using-gffx-as-a-rust-library)
+- [Index File Types](#index-file-types)
+- [License](#license)
+- [Notes(#notes)
+
+---
+
+## Installation
+
+```bash
+cargo install gffx
+```
+
+Requires Rust >= 1.70.
 
 ---
 
@@ -20,7 +47,7 @@ Available subcommands:
 
 ---
 
-## `index`: Build Index for GFF
+### `index`
 
 Builds index files from a GFF file to accelerate downstream operations.
 
@@ -39,7 +66,7 @@ gffx index [OPTIONS] --input <INPUT>
 
 ---
 
-## `intersect`: Extract Features by Region
+### `intersect`
 
 Extracts models intersecting with regions from a GFF file, either from a single region or a BED file.
 
@@ -72,7 +99,7 @@ Optional
 
 ---
 
-## `extract`: Extract Features by ID
+### `extract`
 
 Extracts annotation models by feature ID(s), including their parent models.
 
@@ -101,7 +128,7 @@ Optional
 | `-h`, `--help`              | Show help message                                                              |
 ---
 
-## `search`: Search Features by Attribute
+### `search`
 
 Searches for features using a specified attribute value and retrieves the full annotation models.
 
@@ -130,7 +157,7 @@ Optional
 | `-h`, `--help`              | Show help message                                                              |
 ---
 
-## 💡 Example Use Cases
+## Example Use Cases
 
 ```bash
 # Build index
@@ -148,7 +175,94 @@ gffx search -a TP53 -i genes.gff -o tp53_model.gff
 
 ---
 
-## 🛠️ Notes
+## Using GFFx as a Rust Library
+
+You can use GFFx as a Rust library in your own project.
+
+### Add to Cargo.toml
+
+```toml
+[dependencies]
+gffx = "0.1.0"
+```
+
+### Example: Manually extract features from region using index files
+The following example runs inside a main() -> Result<()> context:
+
+```rust
+use gffx::{CommonArgs, load_sqs, load_gbi, load_gof, write_gff_header, write_block};
+use std::{collections::HashMap, io::{stdout, BufWriter}};
+
+let args = CommonArgs::from_path("example.gff3");
+let gff = std::fs::read(&args.input)?;
+
+let seqs = load_sqs(&args.input)?;
+let gbi = load_gbi(&args.input)?;
+let gof = load_gof(&args.input)?;
+
+let chr_id = seqs.iter().position(|s| s == "chr1").unwrap() as u32;
+let hits = gbi.into_iter()
+    .filter(|e| e.seqid_id == chr_id && e.start <= 20000 && e.end >= 10000)
+    .filter_map(|e| gof.iter().find(|x| x.feature_id == e.feature_id))
+    .collect::<Vec<_>>();
+
+let mut out = BufWriter::new(stdout());
+write_gff_header(&mut out, &gff)?;
+for (so, eo) in hits.iter().map(|e| (e.start_offset, e.end_offset)) {
+    write_block(&mut out, &gff[*so as usize..*eo as usize], None)?;
+}
+```
+
+---
+
+### Available Public APIs
+
+#### Index building & checking (`index_builder`)
+- `build_index`
+- `check_index_files_exist`
+
+#### Index loading (`index_loader`)
+- `load_gbi`, `load_gof`, `load_prt`, `load_fts`, `load_atn`, `load_a2f`, `load_sqs`
+- `safe_mmap_readonly`
+
+#### Core data structures
+- `GbiEntry`, `GofEntry`, `PrtEntry`, `A2fEntry`
+
+#### Output utilities (`utils`)
+- `write_gff_output`
+- `write_gff_header`
+- `write_block`
+- `append_suffix`
+
+#### Command-line compatibility
+- `CommonArgs`
+
+---
+
+
+## Index File Types
+
+| File Extension | Purpose                                     |
+|----------------|---------------------------------------------|
+| `.gbi`         | Tabix-like binning index                    |
+| `.gof`         | Byte offset index for GFF feature blocks    |
+| `.fts`         | Feature ID table                            |
+| `.prt`         | Child to parent mapping                     |
+| `.a2f`         | Attribute to feature ID mapping             |
+| `.atn`         | Attribute value table                       |
+| `.sqs`         | Sequence ID table                           |
+
+---
+
+## Notes
 
 - Make sure you run `gffx index` before using `intersect`, `extract`, or `search`.
 - All subcommands are optimized for multi-threaded execution where applicable.
+
+---
+
+## License
+
+GFFx is released under the MIT or Apache-2.0 License.
+
+---
