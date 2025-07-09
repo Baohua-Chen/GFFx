@@ -1,0 +1,14 @@
+# === Rust build output ===
+/target/
+
+# === IDEs and editors ===
+**/*.swp
+.idea/
+.vscode/
+
+# === OS files ===
+.DS_Store
+Thumbs.db
+
+# === Dependency lock file (optional, keep if you want reproducibility) ===
+Cargo.lock

@@ -1,0 +1,419 @@
+use anyhow::{Result};
+use clap::{Parser, ArgGroup};
+use memmap2::Mmap;
+use rayon::{ThreadPoolBuilder, prelude::*};
+use std::{
+    fs::File,
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex},
+    time::Instant,
+    hash::BuildHasher,
+    io::{BufRead, Write, BufReader, SeekFrom, Seek},
+};
+use byteorder::{LittleEndian, ReadBytesExt};
+use rustc_hash::{FxHashMap};
+use crate::{CommonArgs, load_sqs, append_suffix, load_gof};
+
+/// Arguments for region intersection operations
+#[derive(Parser, Debug)]
+#[command(
+    about = "Extract models by a region or regions from a BED file",
+    long_about = "This tool extracts features and their parent models that intersect with specified regions"
+)]
+#[clap(group(
+    ArgGroup::new("regions").required(true).args(&["region", "bed"])
+))]
+#[clap(group(
+    ArgGroup::new("mode").args(&["contained", "contains_region", "overlap"])
+))]
+pub struct IntersectArgs {
+    #[clap(flatten)]
+    pub common: CommonArgs,
+
+    /// Single region in format "chr:start-end"
+    #[arg(short = 'r', long, group = "regions")]
+    pub region: Option<String>,
+
+    /// BED file containing regions
+    #[arg(short = 'b', long, group = "regions")]
+    pub bed: Option<PathBuf>,
+
+    /// Only return features fully contained within regions
+    #[arg(short = 'c', long, group = "mode")]
+    pub contained: bool,
+
+    /// Only return features that fully contain the regions
+    #[arg(short = 'C', long, group = "mode")]
+    pub contains_region: bool,
+
+    /// Return any overlapping features (default)
+    #[arg(short = 'O', long, group = "mode")]
+    pub overlap: bool,
+
+    /// Invert the selection (exclude matching features)
+    #[arg(short = 'I', long, default_value_t = false)]
+    pub invert: bool,
+}
+
+#[derive(Debug)]
+pub struct IndexData {
+    /// Mapping from sequence number to feature entries (start, end, feature_id)
+    pub chr_entries: FxHashMap<u32, Vec<(u32, u32, u32)>>,
+    /// Mapping from sequence name to sequence number
+    pub seqid_to_num: FxHashMap<String, u32>,
+}
+
+impl IndexData {
+    pub fn load(index_prefix: &Path) -> Result<Self> {
+        let (seqid_list, _) = load_sqs(&index_prefix)?;
+        let seqid_to_num: FxHashMap<_, _> = seqid_list.into_iter()
+            .enumerate()
+            .map(|(i, seqid)| (seqid, i as u32))
+            .collect();
+
+        // Load region index
+        let rit_path = append_suffix(index_prefix, ".rit");
+        let rix_path = append_suffix(index_prefix, ".rix");
+        let chr_entries = Self::load_region_index(&rit_path, &rix_path)?;
+
+        Ok(Self { chr_entries, seqid_to_num })
+    }
+
+    fn load_region_index(
+        rit_path: &Path,
+        rix_path: &Path,
+    ) -> Result<FxHashMap<u32, Vec<(u32, u32, u32)>>> {
+        // Load offsets
+        let mut rix_file = File::open(rix_path)?;
+        let mut offsets = Vec::new();
+        while let Ok(offset) = rix_file.read_u32::<LittleEndian>() {
+            offsets.push(offset);
+        }
+
+        // Load data
+        let mut rit_file = BufReader::new(File::open(rit_path)?);
+        let mut chr_entries = FxHashMap::default();
+
+        for seq_num in 0..(offsets.len() - 1) {
+            let start = offsets[seq_num] as u64;
+            let end = offsets[seq_num + 1] as u64;
+            
+            rit_file.seek(SeekFrom::Start(start))?;
+            
+            let mut entries = Vec::new();
+            while rit_file.stream_position()? < end {
+                entries.push((
+                    rit_file.read_u32::<LittleEndian>()?,  // start
+                    rit_file.read_u32::<LittleEndian>()?,  // end
+                    rit_file.read_u32::<LittleEndian>()?,  // feature_id
+                ));
+            }
+            
+            chr_entries.insert(seq_num as u32, entries);
+        }
+
+        Ok(chr_entries)
+    }
+}
+
+/// Parse a single genomic region string (chr:start-end)
+fn parse_region<S: BuildHasher>(
+    region: &str,
+    seqid_map: &FxHashMap<String, u32, S>,
+) -> Result<(u32, u32, u32)> {
+    let parts: Vec<&str> = region.split(':').collect();
+    if parts.len() != 2 {
+        anyhow::bail!("Invalid region format, expected 'chr:start-end'");
+    }
+
+    let seqid = parts[0];
+    let range: Vec<&str> = parts[1].split('-').collect();
+    if range.len() != 2 {
+        anyhow::bail!("Invalid range format, expected 'start-end'");
+    }
+
+    let start = range[0].parse::<u32>()?;
+    let end = range[1].parse::<u32>()?;
+
+    let seq_num = seqid_map.get(seqid)
+        .ok_or_else(|| anyhow::anyhow!("Sequence ID not found: {}", seqid))?;
+
+    Ok((*seq_num, start, end))
+}
+
+
+/// Parse BED file into (seq_num, start, end) tuples
+fn parse_bed_file<S: BuildHasher>(
+    bed_path: &Path,
+    seqid_map: &FxHashMap<String, u32, S>,
+) -> Result<Vec<(u32, u32, u32)>> {
+    let file = File::open(bed_path)?;
+    let mut regions = Vec::new();
+    
+    for line in BufReader::new(file).lines() {
+        let line = line?;
+        if line.is_empty() || line.starts_with('#') || line.starts_with("track") {
+            continue;
+        }
+        
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        if fields.len() < 3 {
+            continue;
+        }
+        
+        let seqid = fields[0];
+        let start = fields[1].parse::<u32>()?;
+        let end = fields[2].parse::<u32>()?;
+        
+        if let Some(&seq_num) = seqid_map.get(seqid) {
+            regions.push((seq_num, start, end));
+        }
+    }
+    
+    Ok(regions)
+}
+/// Main execution function
+pub fn run(args: &IntersectArgs) -> Result<()> {
+    let total_start = Instant::now();
+    
+    // Initialize parallel thread pool
+    ThreadPoolBuilder::new()
+        .num_threads(args.common.threads)
+        .build_global()
+        .context("Failed to initialize thread pool")?;
+
+    if args.common.verbose {
+        eprintln!("[INFO] Using {} threads", args.common.threads);
+        eprintln!("[INFO] Loading index from: {}", args.common.input.display());
+    }
+
+    // Load sequence ID mapping
+    let seq_start = Instant::now();
+    let (_, seqid_map) = load_sqs(&args.common.input)?;
+    if args.common.verbose {
+        eprintln!("[TIME] Sequence ID loading: {:.2?}", seq_start.elapsed());
+    }
+
+    // Parse input regions
+    let region_start = Instant::now();
+    let regions = if let Some(bed_path) = &args.bed {
+        parse_bed_file(bed_path, &seqid_map)?
+    } else if let Some(region_str) = &args.region {
+        vec![parse_region(region_str, &seqid_map)?]
+    } else {
+        anyhow::bail!("No region source specified");
+    };
+    if args.common.verbose {
+        eprintln!("[TIME] Region parsing: {:.2?}", region_start.elapsed());
+    }
+
+    // Load index data
+    let index_start = Instant::now();
+    let index_data = Arc::new(IndexData::load(&args.common.input)?);
+    if args.common.verbose {
+        eprintln!("[TIME] Index loading: {:.2?}", index_start.elapsed());
+    }
+    
+    // Execute region query
+    let query_start = Instant::now();
+    let results = query_features(
+        &index_data,
+        &regions,
+        args.contained,
+        args.contains_region,
+        args.invert,
+    )?;
+    if args.common.verbose {
+        eprintln!("[TIME] Feature query: {:.2?}", query_start.elapsed());
+        eprintln!("[INFO] Found {} features", results.len());
+    }
+
+    // Load GOF entries
+    let gof_start = Instant::now();
+    let gof_entries = load_gof(&args.common.input)?;
+    let gof_map: FxHashMap<u32, (u64, u64)> = gof_entries
+        .into_iter()
+        .map(|e| (e.feature_id, (e.start_offset, e.end_offset)))
+        .collect();
+    if args.common.verbose {
+        eprintln!("[TIME] GOF loading: {:.2?}", gof_start.elapsed());
+    }
+
+    // Collect unique feature IDs
+    let unique_start = Instant::now();
+    let mut feature_num_ids: Vec<u32> = results.iter().map(|&(id, _, _)| id).collect();
+    feature_num_ids.sort_unstable();  // 提高内存局部性
+    feature_num_ids.dedup();
+    if args.common.verbose {
+        eprintln!("[TIME] Unique feature collection: {:.2?}", unique_start.elapsed());
+        eprintln!("[INFO] Extracting {} unique features from GFF", feature_num_ids.len());
+    }
+
+    // Extract and output GFF blocks
+    let extract_start = Instant::now();
+    extract_gff_blocks(
+        &args.common.input,
+        &gof_map,
+        &feature_num_ids,
+        &args.common.output,
+        args.common.threads,
+        args.common.verbose,
+    )?;
+    if args.common.verbose {
+        eprintln!("[TIME] GFF extraction: {:.2?}", extract_start.elapsed());
+        eprintln!("[TIME] Total execution time: {:.2?}", total_start.elapsed());
+    }
+
+    Ok(())
+}
+
+/// Core feature query logic
+fn query_features(
+    index_data: &IndexData,
+    regions: &[(u32, u32, u32)],
+    contained: bool,
+    contains_region: bool,
+    invert: bool,
+) -> Result<Vec<(u32, u32, u32)>> {
+    // Parallel sort regions by genomic coordinates
+    let mut regions = regions.to_vec();
+    regions.par_sort_unstable_by_key(|&(chr, start, _)| (chr, start));
+
+    // Determine overlap mode
+    let mode = if contained {
+        OverlapMode::Contained
+    } else if contains_region {
+        OverlapMode::ContainsRegion
+    } else {
+        OverlapMode::Overlap
+    };
+
+    // Parallelized chromosome-wise processing
+    let results: Vec<_> = index_data.chr_entries
+        .par_iter()
+        .flat_map(|(seq_num, rit_entries)| {
+            // Filter regions for current chromosome
+            let chr_regions: Vec<_> = regions.iter()
+                .filter(|&&(chr, _, _)| chr == *seq_num)
+                .collect();
+
+            find_overlaps(rit_entries, &chr_regions, mode, invert)
+        })
+        .collect();
+
+    Ok(results)
+}
+
+/// Overlap detection modes
+#[derive(Debug, Clone, Copy)]
+enum OverlapMode {
+    Contained,        // Feature fully within query region
+    ContainsRegion,   // Feature fully contains query region  
+    Overlap,          // Any overlap (default)
+}
+
+/// Find overlapping features with configurable matching logic
+#[inline]
+fn find_overlaps(
+    features: &[(u32, u32, u32)],  // (start, end, feature_id)
+    regions: &[&(u32, u32, u32)],  // (seq_num, start, end)
+    mode: OverlapMode,
+    invert: bool,
+) -> Vec<(u32, u32, u32)> {
+    let mut results = Vec::new();
+    let mut feature_ptr = 0;
+
+    for &&(_, region_start, region_end) in regions {
+        // Binary search to find first potentially overlapping feature
+        feature_ptr = match features[feature_ptr..].binary_search_by(|&(s, _, _)| s.cmp(&region_start)) {
+            Ok(i) => i + feature_ptr,
+            Err(i) => i + feature_ptr,
+        };
+
+        // Linear scan through overlapping features
+        while feature_ptr < features.len() {
+            let (feat_start, feat_end, feat_id) = features[feature_ptr];
+            
+            if feat_start > region_end {
+                break;
+            }
+
+            let matches = match mode {
+                OverlapMode::Contained => 
+                    feat_start >= region_start && feat_end <= region_end,
+                OverlapMode::ContainsRegion => 
+                    feat_start <= region_start && feat_end >= region_end,
+                OverlapMode::Overlap => 
+                    feat_end >= region_start && feat_start <= region_end,
+            };
+
+            if matches ^ invert {
+                results.push((feat_id, feat_start, feat_end));
+            }
+
+            feature_ptr += 1;
+        }
+    }
+
+    results
+}
+
+/// Extract GFF blocks using memory-mapped file and parallel processing
+fn extract_gff_blocks(
+    gff_path: &Path,
+    gof_map: &FxHashMap<u32, (u64, u64)>,
+    feature_ids: &[u32],
+    output: &Option<PathBuf>,
+    threads: usize,
+    verbose: bool,
+) -> Result<()> {
+    let start_time = Instant::now();
+    
+    let file = File::open(gff_path)?;
+    let mmap = unsafe { Mmap::map(&file)? };
+    let mmap_ref = &mmap;
+
+    let output_writer: Arc<Mutex<Box<dyn Write + Send>>> = match output {
+        Some(path) => Arc::new(Mutex::new(Box::new(File::create(path)?))),
+        None => Arc::new(Mutex::new(Box::new(std::io::stdout()))),
+    };
+
+    if verbose {
+        eprintln!("[INFO] Extracting {} feature blocks from GFF", feature_ids.len());
+    }
+
+    if threads > 1 {
+        let chunk_size = (feature_ids.len() / threads).max(1);
+        feature_ids.par_chunks(chunk_size)
+            .try_for_each(|chunk| -> Result<()> {
+                let mut local_buf = Vec::new();
+                for &id in chunk {
+                    if let Some(&(start, end)) = gof_map.get(&id) {
+                        let start = start as usize;
+                        let end = end as usize;
+                        if start < end && end <= mmap_ref.len() {
+                            local_buf.extend_from_slice(&mmap_ref[start..end]);
+                        }
+                    }
+                }
+                output_writer.lock().unwrap().write_all(&local_buf)?;
+                Ok(())
+            })?;
+    } else {
+        let mut writer = output_writer.lock().unwrap();
+        for &id in feature_ids {
+            if let Some(&(start, end)) = gof_map.get(&id) {
+                let start = start as usize;
+                let end = end as usize;
+                if start < end && end <= mmap.len() {
+                    writer.write_all(&mmap[start..end])?;
+                }
+            }
+        }
+    }
+
+    if verbose {
+        eprintln!("[INFO] GFF extraction completed in {:.2?}", start_time.elapsed());
+    }
+    Ok(())
+}

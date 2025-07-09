@@ -1,0 +1,31 @@
+[package]
+name = "gffx"
+version = "0.1.1"
+edition = "2024"
+authors = ["Baohua Chen <cbh1117.163.com>"]
+description = "An ultra-fast and memory-efficient toolkit for querying GFF files, written with Rust"
+license = "MIT OR Apache-2.0"
+readme = "Readme.md"
+repository = "https://github.com/Baohua-Chen/GFFx"
+homepage = "https://github.com/Baohua-Chen"
+keywords = ["gff-file", "bioinformatics", "genomics"]
+categories = ["command-line-utilities", "science"]
+documentation = "https://docs.rs/gffx"
+exclude = ["tests/", "benchmark/", "target"]
+
+[dependencies]
+regex = "1.11.1"
+memchr = "2.7.4"
+clap = { version = "4.5.37", features = ["derive"] }
+anyhow = "1.0.98"
+byteorder = "1.5.0"
+memmap2 = "0.9.5"
+rayon = '1.10.0'
+indexmap = '2.10.0'
+rustc-hash = '2.1.1'
+bstr = '1.12.0'
+lexical-core = '1.0.5'
+meminterval = '0.4.1'
+serde_json = '1.0.140'
+serde = { version = '1.0.219', features = ["derive"] }
+bincode2 = '2.0.1'

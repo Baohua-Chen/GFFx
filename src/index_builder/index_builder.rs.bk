@@ -1,0 +1,278 @@
+use anyhow::{Result, bail};
+use memmap2::Mmap;
+use memchr::memchr;
+use regex::{Regex, escape};
+use std::{
+    fs::File,
+    collections::HashMap,
+    path::PathBuf,
+    io::{Write, BufWriter}
+};
+use byteorder::{LittleEndian, WriteBytesExt};
+use crate::append_suffix;
+use indexmap::IndexMap;
+
+// Writes text lines to a file
+pub fn write_lines(path: PathBuf, lines: &[String]) -> Result<()> {
+    let mut file = File::create(path)?;
+    for line in lines {
+        writeln!(file, "{}", line)?;
+    }
+    Ok(())
+}
+
+// Writes u32 values in binary little-endian format
+pub fn write_binary_u32(path: PathBuf, values: &[u32]) -> Result<()> {
+    let mut file = File::create(path)?;
+    for &v in values {
+        file.write_u32::<LittleEndian>(v)?;
+    }
+    Ok(())
+}
+
+// Writes GFF offset records (gof)
+pub fn write_gof(file: &mut File, id: u32, start: u64, end: u64) -> Result<()> {
+    file.write_u32::<LittleEndian>(id)?;
+    file.write_u32::<LittleEndian>(0)?;  // Reserved field
+    file.write_u64::<LittleEndian>(start)?;
+    file.write_u64::<LittleEndian>(end)?;
+    Ok(())
+}
+
+// Checks if all required index files exist
+pub fn check_index_files_exist(gff: &PathBuf, rebuild: bool, attr_key: &str, verbose: bool) -> Result<bool> {
+    let expected_suffixes = [".gof", ".fts", ".prt", ".sqs", ".atn", ".a2f", ".rit", ".rix"];
+    let mut missing = Vec::new();
+
+    for ext in &expected_suffixes {
+        let path = append_suffix(gff, ext);
+        if !path.exists() {
+            missing.push(ext.to_string());
+        }
+    }
+
+    if !missing.is_empty() {
+        if rebuild {
+            build_index(gff, attr_key, verbose)?;
+            return Ok(true);
+        }
+        return Ok(false);
+    }
+    Ok(true)
+}
+
+// Main index building function
+pub fn build_index(gff: &PathBuf, attr_key: &str, verbose: bool) -> Result<()> {
+    // Compile regex patterns
+    let id_re = Regex::new(r"ID=([^;\s]+)")?;
+    let parent_re = Regex::new(r"Parent=([^;\s]+)")?;
+    let attr_re = Regex::new(&format!(r"{}=([^;\s]+)", escape(attr_key)))?;
+
+    if verbose {
+        eprintln!("Building index for {} ...", gff.display());
+    }
+
+    // Memory-map input file
+    let file = File::open(&gff)?;
+    let mmap = unsafe { Mmap::map(&file)? };
+    let data = &mmap[..];
+
+    // Initialize data structures
+    let mut offset = 0;
+    let mut feature_counter = 0;
+    let mut feature_map = HashMap::new();
+    let mut a2f_entries = Vec::new();
+    let mut prt_entries = Vec::new();
+    let mut attr_value_to_id = HashMap::new();
+    let mut atn_entries = Vec::new();
+    
+    // Use IndexMap to maintain seqid order
+    let mut seqid_to_num = IndexMap::new();
+    let mut current_root = None;
+    
+    // Create output files
+    let mut gof_file = File::create(append_suffix(gff, ".gof"))?;
+    let mut fts_file = File::create(append_suffix(gff, ".fts"))?;
+    
+    // Open .rit file (Buffered for better performance)
+    let rit_path = append_suffix(gff, ".rit");
+    let rit_file = File::create(&rit_path)?;
+    let mut rit_writer = BufWriter::new(rit_file);
+    let mut rit_offset = 0u32;
+    
+    // Open .rix file
+    let rix_path = append_suffix(gff, ".rix");
+    let rix_file = File::create(&rix_path)?;
+    let mut rix_writer = BufWriter::new(rix_file);
+    let mut current_offset = 0u32;
+    
+    // Track current seqid and its intervals
+    let mut current_seqid: Option<String> = None;
+    let mut current_intervals = Vec::new();
+
+    // Process each GFF line
+    while offset < data.len() {
+        // Find line boundaries
+        let nl_pos = memchr(b'\n', &data[offset..])
+            .map(|pos| pos + offset)
+            .unwrap_or(data.len());
+        let line_bytes = &data[offset..nl_pos];
+        let line_offset = offset as u64;
+        offset = nl_pos + 1;
+
+        // Skip comments/empty lines
+        if line_bytes.is_empty() || line_bytes[0] == b'#' {
+            continue;
+        }
+        let line = std::str::from_utf8(line_bytes)?.trim();
+        if line.is_empty() {
+            continue;
+        }
+
+        // Parse GFF columns
+        let fields: Vec<&str> = line.split('\t').collect();
+        if fields.len() != 9 {
+            bail!("Invalid GFF line (expected 9 columns): {}", line);
+        }
+
+        let seqid = fields[0];
+        let start = fields[3].parse::<u32>()?;
+        let end = fields[4].parse::<u32>()?;
+
+        // Handle seqid ordering and numbering
+        let _seq_num = match seqid_to_num.get(seqid) {
+            Some(&num) => num,
+            None => {
+                let num = seqid_to_num.len() as u32;
+                
+                // If switching to new seqid, write previous intervals to .rit
+                if let Some(_prev_seqid) = current_seqid.take() {
+                    // Write all intervals for the previous seqid
+                    let intervals_count = current_intervals.len();
+                    current_intervals.sort_by_key(|(start, _, _)| *start);
+                    for (start, end, gof_id) in current_intervals.drain(..) {
+                        rit_writer.write_u32::<LittleEndian>(start)?;
+                        rit_writer.write_u32::<LittleEndian>(end)?;
+                        rit_writer.write_u32::<LittleEndian>(gof_id)?;
+                        rit_offset += 12;
+                    }
+                    // Update .rix offset for the previous seqid
+                    rix_writer.write_u32::<LittleEndian>(current_offset)?;
+                    current_offset += (intervals_count* 12) as u32;
+                }
+                
+                seqid_to_num.insert(seqid.to_string(), num);
+                current_seqid = Some(seqid.to_string());
+                num
+            }
+        };
+
+        // Process feature ID
+        let id = id_re.captures(line)
+            .ok_or_else(|| anyhow::anyhow!("Missing ID in feature: {}", line))?[1]
+            .to_string();
+
+        let feature_id = if let Some(&fid) = feature_map.get(&id) {
+            // Existing feature - validate parent consistency
+            let old_pid = prt_entries[fid as usize];
+            let parent_id = match parent_re.captures(line) {
+                Some(cap) => *feature_map.get(&cap[1])
+                    .ok_or_else(|| anyhow::anyhow!("Parent not found: {}", &cap[1]))?,
+                None => fid,
+            };
+            if old_pid != parent_id {
+                bail!("Parent conflict for {}: {} vs {}", id, old_pid, parent_id);
+            }
+            fid
+        } else {
+            // New feature processing
+            let fid = feature_counter;
+            feature_map.insert(id.clone(), fid);
+            feature_counter += 1;
+            writeln!(fts_file, "{}", id)?;
+
+            // Handle parent relationships
+            let parent_id = match parent_re.captures(line) {
+                Some(cap) => *feature_map.get(&cap[1])
+                    .ok_or_else(|| anyhow::anyhow!("Parent not found: {}", &cap[1]))?,
+                None => fid,
+            };
+            prt_entries.push(parent_id);
+
+            // Handle root features (no parent or self-parent)
+            if parent_id == fid {
+                // Store current interval (for .rit)
+                current_intervals.push((start, end, fid));
+
+                // Update .gof file
+                if let Some((old_id, old_start)) = current_root.take() {
+                    write_gof(&mut gof_file, old_id, old_start, line_offset)?;
+                }
+                current_root = Some((fid, line_offset));
+            }
+            fid
+        };
+
+        // Process attributes
+        if let Some(cap) = attr_re.captures(line) {
+            let attr_val = cap[1].to_string();
+            let attr_id = *attr_value_to_id.entry(attr_val.clone())
+                .or_insert_with(|| {
+                    let aid = atn_entries.len() as u32;
+                    atn_entries.push(attr_val);
+                    aid
+                });
+
+            if feature_id as usize >= a2f_entries.len() {
+                a2f_entries.push(attr_id);
+            } else if a2f_entries[feature_id as usize] != attr_id {
+                bail!("Attribute conflict for {}: {}", attr_key, id);
+            }
+        } else if feature_id as usize >= a2f_entries.len() {
+            a2f_entries.push(u32::MAX); // Marker for no attribute
+        }
+    }
+
+    // After processing all lines, handle the last seqid's intervals
+    if let Some(_seqid) = current_seqid {
+        // Write remaining intervals for the last seqid
+
+        for (start, end, gof_id) in current_intervals {
+            rit_writer.write_u32::<LittleEndian>(start)?;
+            rit_writer.write_u32::<LittleEndian>(end)?;
+            rit_writer.write_u32::<LittleEndian>(gof_id)?;
+            rit_offset += 12;
+        }
+        // Write the final offset to .rix
+        rix_writer.write_u32::<LittleEndian>(current_offset)?;
+    }
+
+    rix_writer.write_u32::<LittleEndian>(rit_offset)?;
+
+    // Write last root feature if any
+    if let Some((id, start)) = current_root.take() {
+        write_gof(&mut gof_file, id, start, offset as u64)?;
+    }
+
+    // Flush all writers to ensure data is written to disk
+    rit_writer.flush()?;
+    rix_writer.flush()?;
+
+    // Write remaining index files
+    let seqids: Vec<String> = seqid_to_num.keys().cloned().collect();
+    write_lines(append_suffix(gff, ".sqs"), &seqids)?;
+    
+    write_lines(append_suffix(gff, ".atn"), &{
+        let mut lines = vec![format!("#attribute={}", attr_key)];
+        lines.extend(atn_entries);
+        lines
+    })?;
+    write_binary_u32(append_suffix(gff, ".a2f"), &a2f_entries)?;
+    write_binary_u32(append_suffix(gff, ".prt"), &prt_entries)?;
+
+    if verbose {
+        eprintln!("Index built successfully for {}", gff.display());
+    }
+
+    Ok(())
+}
