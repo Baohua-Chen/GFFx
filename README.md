@@ -6,7 +6,7 @@ It can be used both as a **command-line tool** and as a **Rust library**.
 
 ## Table of Contents
 
-*GFFx version 0.1.1*
+*GFFx version 0.2.0a*
 
 - [Installation](#installation)
 - [Basic Usage](#basic-usage)
