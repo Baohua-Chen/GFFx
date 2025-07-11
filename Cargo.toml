@@ -11,7 +11,7 @@ homepage = "https://github.com/Baohua-Chen"
 keywords = ["gff-file", "bioinformatics", "genomics"]
 categories = ["command-line-utilities", "science"]
 documentation = "https://docs.rs/gffx"
-exclude = ["tests/", "benchmark/", "target"]
+exclude = ["benchmark/**", "target/**"]
 
 [dependencies]
 regex = "1.11.1"
