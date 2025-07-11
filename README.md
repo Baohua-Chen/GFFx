@@ -194,7 +194,7 @@ You can use GFFx as a Rust library in your own project.
 
 ```toml
 [dependencies]
-gffx = "0.1.1"
+gffx = "0.2.0a"
 ```
 
 ### Example: Manually extract features from region using index files
