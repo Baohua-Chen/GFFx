@@ -4,6 +4,12 @@
 **GFFx** is a high-performance, Rust-based toolkit for extracting and querying annotations from GFF3 files. It supports fast indexing and feature retrieval with several subcommands.
 It can be used both as a **command-line tool** and as a **Rust library**.
 
+<p align="center">
+  <img src="intersect_st.png" alt="Benchmarking results" width="450"/>
+  <br>
+  <span>Benchmarking runtime and memory usage of region-based feature extraction</span>
+</p>
+
 ## Table of Contents
 
 *GFFx version 0.2.0-**
