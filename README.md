@@ -5,9 +5,9 @@
 It can be used both as a **command-line tool** and as a **Rust library**.
 
 <p align="center">
-  <img src="intersect_st.png" alt="Benchmarking results" width="600"/>
+  <img src="extract.png" alt="Benchmarking results" width="600"/>
   <br>
-  <span>Benchmarking runtime and memory usage of region-based feature extraction</span>
+  <span>Benchmarking runtime and memory usage of ID-based feature extraction</span>
 </p>
 
 ## Table of Contents
