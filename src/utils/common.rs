@@ -1,13 +1,13 @@
-use anyhow::{Result};
-use std::{
-    io::{Write, BufWriter, IoSlice, stdout},
-    path::{PathBuf, Path},
-    fs::File,
-    str};
-use clap::{Parser};
-use crate::index_builder::index_builder::build_index;
+use crate::index_builder::core::build_index;
+use anyhow::Result;
+use clap::Parser;
 use memmap2::Mmap;
-
+use std::{
+    fs::File,
+    io::{BufWriter, IoSlice, Write, stdout},
+    path::{Path, PathBuf},
+    str,
+};
 
 pub fn append_suffix(path: &Path, suffix: &str) -> PathBuf {
     let parent = path.parent().unwrap_or_else(|| Path::new(""));
@@ -38,7 +38,6 @@ pub struct CommonArgs {
     pub threads: usize,
 }
 
-
 /// Write GFF header lines (starting with '#') to output
 /// Returns the byte position after the header
 pub fn write_gff_header<W: Write>(writer: &mut W, gff_buf: &[u8]) -> Result<usize> {
@@ -54,7 +53,6 @@ pub fn write_gff_header<W: Write>(writer: &mut W, gff_buf: &[u8]) -> Result<usiz
     }
     Ok(pos)
 }
-
 
 /// Optimized write_gff_output: memory-maps input, merges adjacent/overlapping blocks,
 /// and uses buffered output to minimize syscalls.
@@ -129,14 +127,24 @@ pub fn write_gff_output(
     writer.flush()?;
 
     if verbose {
-        eprintln!("Wrote {} merged GFF block(s) with vectored I/O", merged.len());
+        eprintln!(
+            "Wrote {} merged GFF block(s) with vectored I/O",
+            merged.len()
+        );
     }
     Ok(())
 }
 
 // Checks if all required index files exist
-pub fn check_index_files_exist(gff: &PathBuf, rebuild: bool, attr_key: &str, verbose: bool) -> Result<bool> {
-    let expected_suffixes = [".gof", ".fts", ".prt", ".sqs", ".atn", ".a2f", ".rit", ".rix"];
+pub fn check_index_files_exist(
+    gff: &PathBuf,
+    rebuild: bool,
+    attr_key: &str,
+    verbose: bool,
+) -> Result<bool> {
+    let expected_suffixes = [
+        ".gof", ".fts", ".prt", ".sqs", ".atn", ".a2f", ".rit", ".rix",
+    ];
     let mut missing = Vec::new();
 
     for ext in &expected_suffixes {

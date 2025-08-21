@@ -1,14 +1,14 @@
-use anyhow::{Result, Context, bail};
-use memmap2::Mmap;
-use byteorder::{LittleEndian, ReadBytesExt, ByteOrder};
 use crate::append_suffix;
-use std::{
-//    collections::HashMap,
-    fs::File,
-    io::{BufReader, ErrorKind, BufRead},
-    path::{Path, PathBuf},
-};
+use anyhow::{Context, Result, bail};
+use byteorder::{ByteOrder, LittleEndian, ReadBytesExt};
+use memmap2::Mmap;
 use rustc_hash::FxHashMap;
+use std::{
+    //    collections::HashMap,
+    fs::File,
+    io::{BufRead, BufReader, ErrorKind},
+    path::Path,
+};
 
 #[derive(Debug)]
 pub struct GofEntry {
@@ -39,15 +39,11 @@ pub struct A2fEntry {
 }
 
 pub fn safe_mmap_readonly(path: &Path) -> Result<Mmap> {
-    let file = File::open(path)
-        .with_context(|| format!("Failed to open file: {:?}", path))?;
-    unsafe { Mmap::map(&file) }
-        .with_context(|| format!("Failed to mmap file: {:?}", path))
+    let file = File::open(path).with_context(|| format!("Failed to open file: {:?}", path))?;
+    unsafe { Mmap::map(&file) }.with_context(|| format!("Failed to mmap file: {:?}", path))
 }
 
-pub fn load_sqs<P: AsRef<Path>>(
-    path: P,
-) -> Result<(Vec<String>, FxHashMap<String, u32>)> {
+pub fn load_sqs<P: AsRef<Path>>(path: P) -> Result<(Vec<String>, FxHashMap<String, u32>)> {
     let path = path.as_ref();
     let sqs_path = append_suffix(path, ".sqs");
     let file = File::open(&sqs_path)
@@ -67,21 +63,28 @@ pub fn load_sqs<P: AsRef<Path>>(
 pub fn load_gof<P: AsRef<Path>>(base: P) -> Result<Vec<GofEntry>> {
     let path = base.as_ref();
     let gof_path = append_suffix(path, ".gof");
-    let file = File::open(&gof_path)
-        .with_context(|| format!("Failed to open GOF file {:?}", gof_path))?;
+    let file =
+        File::open(&gof_path).with_context(|| format!("Failed to open GOF file {:?}", gof_path))?;
     let mut reader = BufReader::new(file);
     let mut entries = Vec::new();
 
     loop {
         match reader.read_u32::<LittleEndian>() {
             Ok(feature_id) => {
-                let _pad = reader.read_u32::<LittleEndian>()
+                let _pad = reader
+                    .read_u32::<LittleEndian>()
                     .context("Failed reading GOF pad")?;
-                let start = reader.read_u64::<LittleEndian>()
+                let start = reader
+                    .read_u64::<LittleEndian>()
                     .context("Failed reading GOF start offset")?;
-                let end   = reader.read_u64::<LittleEndian>()
+                let end = reader
+                    .read_u64::<LittleEndian>()
                     .context("Failed reading GOF end offset")?;
-                entries.push(GofEntry { feature_id, start_offset: start, end_offset: end });
+                entries.push(GofEntry {
+                    feature_id,
+                    start_offset: start,
+                    end_offset: end,
+                });
             }
             Err(e) if e.kind() == ErrorKind::UnexpectedEof => {
                 break;
@@ -128,9 +131,12 @@ pub fn load_gbi<P: AsRef<Path>>(base: P) -> Result<Vec<GbiEntry>> {
             pos += 4;
 
             for _ in 0..entry_count {
-                let fid   = LittleEndian::read_u32(&buf[pos..pos + 4]); pos += 4;
-                let start = LittleEndian::read_u32(&buf[pos..pos + 4]); pos += 4;
-                let end   = LittleEndian::read_u32(&buf[pos..pos + 4]); pos += 4;
+                let fid = LittleEndian::read_u32(&buf[pos..pos + 4]);
+                pos += 4;
+                let start = LittleEndian::read_u32(&buf[pos..pos + 4]);
+                pos += 4;
+                let end = LittleEndian::read_u32(&buf[pos..pos + 4]);
+                pos += 4;
 
                 entries.push(GbiEntry {
                     seqid_id: sid,
@@ -159,8 +165,7 @@ pub fn load_fts<P: AsRef<Path>>(gff_path: P) -> Result<Vec<String>> {
         if b == b'\n' {
             let slice = &data[start..i];
             if !slice.is_empty() {
-                let s = std::str::from_utf8(slice)
-                    .context("FTS contains invalid UTF-8")?;
+                let s = std::str::from_utf8(slice).context("FTS contains invalid UTF-8")?;
                 lines.push(s.to_string());
             }
             start = i + 1;
@@ -170,7 +175,7 @@ pub fn load_fts<P: AsRef<Path>>(gff_path: P) -> Result<Vec<String>> {
     Ok(lines)
 }
 
-pub fn load_atn(path: &PathBuf) -> Result<(String, Vec<String>)> {
+pub fn load_atn(path: &Path) -> Result<(String, Vec<String>)> {
     let atn_path = append_suffix(path, ".atn");
     let mmap = safe_mmap_readonly(&atn_path)?;
     let data = &mmap[..];
@@ -185,8 +190,8 @@ pub fn load_atn(path: &PathBuf) -> Result<(String, Vec<String>)> {
                 let line = std::str::from_utf8(slice)
                     .context("ATN contains invalid UTF-8")?
                     .trim();
-                if line.starts_with("#attribute=") {
-                    attr_name = line[11..].to_string();
+                if let Some(stripped) = line.strip_prefix("#attribute=") {
+                    attr_name = stripped.to_string();
                 } else if !line.starts_with('#') {
                     values.push(line.to_string());
                 }

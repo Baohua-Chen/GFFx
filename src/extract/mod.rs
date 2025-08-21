@@ -1,17 +1,14 @@
-use anyhow::{Result, Context, bail};
+use crate::{CommonArgs, load_fts, load_gof, load_prt, write_gff_output};
+use anyhow::{Context, Result, bail};
 use clap::Parser;
+use rayon::prelude::*;
 use std::{
     collections::{HashMap, HashSet},
     fs::File,
-    io::{BufReader, BufRead},
+    io::{BufRead, BufReader},
     path::PathBuf,
     sync::{Arc, Mutex},
     time::Instant,
-};
-use rayon::prelude::*;
-use crate::{
-    CommonArgs, load_fts, load_prt, load_gof, 
-    write_gff_output,
 };
 
 /// Extract subtrees from a GFF file by a list of feature names (from --feature-file).
@@ -25,7 +22,6 @@ use crate::{
         .required(true)
         .args(&["feature_file", "feature_id"])
 ))]
-
 pub struct ExtractArgs {
     #[clap(flatten)]
     pub common: CommonArgs,
@@ -51,7 +47,10 @@ fn resolve_root(start: u32, prt_map: &HashMap<u32, u32>) -> Result<u32> {
             None => bail!("Parent not found for feature ID {}", current),
         }
     }
-    bail!("Circular parent relationship detected for feature ID {}", start)
+    bail!(
+        "Circular parent relationship detected for feature ID {}",
+        start
+    )
 }
 
 fn extract_features(
@@ -99,66 +98,59 @@ pub fn run(args: &ExtractArgs) -> Result<()> {
     }
 
     // Build thread pool
-    let t0 = Instant::now();
     rayon::ThreadPoolBuilder::new()
         .num_threads(args.common.threads)
         .build_global()
         .expect("Failed to set thread pool size");
-    if verbose {
-        eprintln!("[timing] ThreadPool setup: {:?}", t0.elapsed());
-    }
 
     // Load features
-    let t1 = Instant::now();
     let fts = load_fts(gff_path)?;
-    if verbose {
-        eprintln!("[timing] load_fts: {:?}", t1.elapsed());
-    }
 
     // Load parent relations
-    let t2 = Instant::now();
     let prt = load_prt(gff_path)?;
-    if verbose {
-        eprintln!("[timing] load_prt: {:?}", t2.elapsed());
-    }
 
     // Load GFF offsets
-    let t3 = Instant::now();
+
     let gof = load_gof(gff_path)?;
-    if verbose {
-        eprintln!("[timing] load_gof: {:?}", t3.elapsed());
-    }
 
     // Build lookup maps
-    let t4 = Instant::now();
-    let fts_map: HashMap<&str, u32> = fts.iter().enumerate().map(|(i, s)| (s.as_str(), i as u32)).collect();
+    let fts_map: HashMap<&str, u32> = fts
+        .iter()
+        .enumerate()
+        .map(|(i, s)| (s.as_str(), i as u32))
+        .collect();
     let prt_map: HashMap<u32, u32> = prt.iter().map(|e| (e.child, e.parent)).collect();
-    let gof_map: HashMap<u32, (u64, u64)> = gof.iter().map(|e| (e.feature_id, (e.start_offset, e.end_offset))).collect();
-    if verbose {
-        eprintln!("[timing] Building maps: {:?}", t4.elapsed());
-    }
+    let gof_map: HashMap<u32, (u64, u64)> = gof
+        .iter()
+        .map(|e| (e.feature_id, (e.start_offset, e.end_offset)))
+        .collect();
 
     // Read feature IDs
-    let t5 = Instant::now();
     let feature_ids: HashSet<String> = if let Some(ref file_path) = args.feature_file {
-        let reader = BufReader::new(File::open(file_path)
-            .with_context(|| format!("Cannot open feature list: {:?}", file_path))?);
+        let file = File::open(file_path)
+            .with_context(|| format!("Cannot open feature list: {:?}", file_path))?;
+        let reader = BufReader::new(file);
+
         reader
-            .lines()
-            .filter_map(Result::ok)
-            .filter(|s| !s.trim().is_empty())
-            .collect()
+            .lines() // Iterator<Item = io::Result<String>>
+            .try_fold(
+                HashSet::new(),
+                |mut set, line| -> Result<HashSet<String>, std::io::Error> {
+                    let s = line?;
+                    let s = s.trim();
+                    if !s.is_empty() {
+                        set.insert(s.to_owned());
+                    }
+                    Ok(set)
+                },
+            )?
     } else if let Some(ref single_id) = args.feature_id {
-        [single_id.clone()].iter().cloned().collect()
+        [single_id.clone()].into_iter().collect()
     } else {
         bail!("Either --feature-id (-f) or --feature-file (-F) must be specified");
     };
-    if verbose {
-        eprintln!("[timing] Reading feature IDs: {:?}", t5.elapsed());
-    }
 
     // Extract features
-    let t6 = Instant::now();
     let block_offsets = extract_features(
         &feature_ids,
         &fts_map,
@@ -167,12 +159,8 @@ pub fn run(args: &ExtractArgs) -> Result<()> {
         args.descendants_only,
         args.common.threads,
     );
-    if verbose {
-        eprintln!("[timing] extract_features: {:?}", t6.elapsed());
-    }
 
     // Write output
-    let t7 = Instant::now();
     write_gff_output(
         gff_path,
         &block_offsets,
@@ -180,9 +168,6 @@ pub fn run(args: &ExtractArgs) -> Result<()> {
         args.common.types.as_deref(),
         args.common.verbose,
     )?;
-    if verbose {
-        eprintln!("[timing] write_gff_output: {:?}", t7.elapsed());
-    }
 
     if verbose {
         eprintln!("[timing] Total elapsed: {:?}", overall_start.elapsed());

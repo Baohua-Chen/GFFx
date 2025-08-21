@@ -1,11 +1,13 @@
+use crate::build_index;
+use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
-use anyhow::Result;
-use crate::build_index;
 
 #[derive(Parser, Debug)]
-#[command(about = "Build index for GFF file", long_about = "This command builds index files for fast retrieval from a GFF file.")]
-
+#[command(
+    about = "Build index for GFF file",
+    long_about = "This command builds index files for fast retrieval from a GFF file."
+)]
 pub struct IndexArgs {
     #[arg(short, long)]
     input: PathBuf,

@@ -1,18 +1,13 @@
-use anyhow::{Result, bail};
+use crate::append_suffix;
+use crate::{Interval, IntervalTree, save_multiple_trees, write_offsets_to_file};
 use anyhow::anyhow;
-use memmap2::Mmap;
-use memchr::memchr;
-use regex::{Regex, escape};
-use std::{
-    fs::File,
-    collections::HashMap,
-    path::PathBuf,
-    io::Write
-};
+use anyhow::{Result, bail};
 use byteorder::{LittleEndian, WriteBytesExt};
 use indexmap::IndexMap;
-use crate::append_suffix;
-use crate::{save_multiple_trees, write_offsets_to_file, IntervalTree, Interval};
+use memchr::memchr;
+use memmap2::Mmap;
+use regex::{Regex, escape};
+use std::{collections::HashMap, fs::File, io::Write, path::PathBuf};
 
 // Writes text lines to a file
 pub fn write_lines(path: PathBuf, lines: &[String]) -> Result<()> {
@@ -35,7 +30,7 @@ pub fn write_binary_u32(path: PathBuf, values: &[u32]) -> Result<()> {
 // Writes GFF offset records (gof)
 pub fn write_gof(file: &mut File, id: u32, start: u64, end: u64) -> Result<()> {
     file.write_u32::<LittleEndian>(id)?;
-    file.write_u32::<LittleEndian>(0)?;  // Reserved field
+    file.write_u32::<LittleEndian>(0)?; // Reserved field
     file.write_u64::<LittleEndian>(start)?;
     file.write_u64::<LittleEndian>(end)?;
     Ok(())
@@ -53,7 +48,7 @@ pub fn build_index(gff: &PathBuf, attr_key: &str, verbose: bool) -> Result<()> {
     }
 
     // Memory-map input file
-    let file = File::open(&gff)?;
+    let file = File::open(gff)?;
     let mmap = unsafe { Mmap::map(&file)? };
     let data = &mmap[..];
 
@@ -82,7 +77,9 @@ pub fn build_index(gff: &PathBuf, attr_key: &str, verbose: bool) -> Result<()> {
             continue;
         }
         let line = std::str::from_utf8(line_bytes)?.trim();
-        if line.is_empty() { continue; }
+        if line.is_empty() {
+            continue;
+        }
 
         let fields: Vec<&str> = line.split('\t').collect();
         if fields.len() != 9 {
@@ -94,7 +91,8 @@ pub fn build_index(gff: &PathBuf, attr_key: &str, verbose: bool) -> Result<()> {
         let end = fields[4].parse::<u32>()?;
 
         // Extract ID
-        let id = id_re.captures(line)
+        let id = id_re
+            .captures(line)
             .ok_or_else(|| anyhow!("Missing ID in feature: {}", line))?[1]
             .to_string();
         // Extract raw Parent (may refer to unseen ID)
@@ -102,7 +100,15 @@ pub fn build_index(gff: &PathBuf, attr_key: &str, verbose: bool) -> Result<()> {
         // Extract attribute value
         let attr = attr_re.captures(line).map(|cap| cap[1].to_string());
 
-        raw_features.push(RawFeature { seqid, start, end, line_offset, id, parent, attr });
+        raw_features.push(RawFeature {
+            seqid,
+            start,
+            end,
+            line_offset,
+            id,
+            parent,
+            attr,
+        });
     }
 
     // Build feature_map: string ID -> numeric ID
@@ -126,13 +132,17 @@ pub fn build_index(gff: &PathBuf, attr_key: &str, verbose: bool) -> Result<()> {
         let fid = feature_map[&rf.id];
         writeln!(fts_file, "{}", rf.id)?;
         // Resolve parent (fallback to self if missing)
-        let parent_id = rf.parent.as_ref()
+        let parent_id = rf
+            .parent
+            .as_ref()
             .and_then(|p| feature_map.get(p).cloned())
             .unwrap_or(fid);
         prt_entries.push(parent_id);
         // Record roots for GOF and intervals
         if parent_id == fid {
-            seqid_intervals.entry(rf.seqid.clone()).or_default()
+            seqid_intervals
+                .entry(rf.seqid.clone())
+                .or_default()
                 .push((rf.start, rf.end, fid));
             if let Some((old_id, old_off)) = current_root.take() {
                 write_gof(&mut gof_file, old_id, old_off, rf.line_offset)?;
@@ -141,8 +151,11 @@ pub fn build_index(gff: &PathBuf, attr_key: &str, verbose: bool) -> Result<()> {
         }
         // Attribute mapping
         if let Some(val) = &rf.attr {
-            let aid = *attr_value_to_id.entry(val.clone())
-                .or_insert_with(|| { let a = atn_entries.len() as u32; atn_entries.push(val.clone()); a });
+            let aid = *attr_value_to_id.entry(val.clone()).or_insert_with(|| {
+                let a = atn_entries.len() as u32;
+                atn_entries.push(val.clone());
+                a
+            });
             a2f_entries.push(aid);
         } else {
             a2f_entries.push(u32::MAX);
@@ -159,8 +172,13 @@ pub fn build_index(gff: &PathBuf, attr_key: &str, verbose: bool) -> Result<()> {
     for (seqid, ivs) in seqid_intervals.iter() {
         let num = seqid_to_num.len() as u32;
         seqid_to_num.insert(seqid.clone(), num);
-        let iv_structs: Vec<Interval<_>> = ivs.iter()
-            .map(|&(start, end, fid)| Interval { start, end, root_fid: fid })
+        let iv_structs: Vec<Interval<_>> = ivs
+            .iter()
+            .map(|&(start, end, fid)| Interval {
+                start,
+                end,
+                root_fid: fid,
+            })
             .collect();
         trees.push(IntervalTree::new(iv_structs));
     }

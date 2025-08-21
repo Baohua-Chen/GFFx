@@ -1,17 +1,17 @@
-use anyhow::{Result, Context};
-use clap::{Parser, ArgGroup};
+use anyhow::{Context, Result};
+use clap::{ArgGroup, Parser};
 use memmap2::Mmap;
 use std::{
     fs::File,
-    io::{Write, Seek, SeekFrom, BufReader},
+    io::{BufReader, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
 };
 //use byteorder::{LittleEndian, ReadBytesExt};
-use rustc_hash::FxHashMap;
-use lexical_core::parse;
 use bincode2::deserialize_from;
+use lexical_core::parse;
+use rustc_hash::FxHashMap;
 //use serde::{Serialize, de::DeserializeOwned};
-use crate::{CommonArgs, load_sqs, append_suffix, load_gof, IntervalTree, Interval};
+use crate::{CommonArgs, Interval, IntervalTree, append_suffix, load_gof, load_sqs};
 
 /// Arguments for region intersection operations
 #[derive(Parser, Debug)]
@@ -71,9 +71,14 @@ fn query_features(
     invert: bool,
 ) -> Result<Vec<(u32, u32, u32)>> {
     if index_data.common.verbose {
-        eprintln!("[DEBUG] Starting query_features with {} regions", regions.len());
-        eprintln!("[DEBUG] Mode: contained={}, contains_region={}, invert={}",
-                 contained, contains_region, invert);
+        eprintln!(
+            "[DEBUG] Starting query_features with {} regions",
+            regions.len()
+        );
+        eprintln!(
+            "[DEBUG] Mode: contained={}, contains_region={}, invert={}",
+            contained, contains_region, invert
+        );
     }
 
     let mut buckets: Vec<Vec<(u32, u32, u32)>> = vec![Vec::new(); index_data.seqid_to_num.len()];
@@ -92,9 +97,15 @@ fn query_features(
     let mut results = Vec::new();
     for (&seq_num, tree) in &index_data.chr_entries {
         let chr_regs = &buckets[seq_num as usize];
-        if chr_regs.is_empty() { continue; }
+        if chr_regs.is_empty() {
+            continue;
+        }
         if index_data.common.verbose {
-            eprintln!("[DEBUG] Querying chromosome {} with {} regions", seq_num, chr_regs.len());
+            eprintln!(
+                "[DEBUG] Querying chromosome {} with {} regions",
+                seq_num,
+                chr_regs.len()
+            );
         }
         for &(_, rstart, rend) in chr_regs {
             let hits: Vec<&Interval<u32>> = tree.query_interval(rstart, rend);
@@ -108,18 +119,30 @@ fn query_features(
 }
 
 /// Parse a single genomic region string (chr:start-end)
-fn parse_region(region: &str, seqid_map: &FxHashMap<String, u32>, common: &CommonArgs) -> Result<(u32, u32, u32)> {
-    let (seq, range) = region.split_once(':')
+fn parse_region(
+    region: &str,
+    seqid_map: &FxHashMap<String, u32>,
+    common: &CommonArgs,
+) -> Result<(u32, u32, u32)> {
+    let (seq, range) = region
+        .split_once(':')
         .context("Invalid region format, expected 'chr:start-end'")?;
-    let (s, e) = range.split_once('-')
+    let (s, e) = range
+        .split_once('-')
         .context("Invalid range format, expected 'start-end'")?;
     let start = s.parse::<u32>()?;
     let end = e.parse::<u32>()?;
-    let chr = seqid_map.get(seq)
+    let chr = seqid_map
+        .get(seq)
         .with_context(|| format!("Sequence ID not found: {}", seq))?;
-    if start >= end { anyhow::bail!("Region start must be less than end ({} >= {})", start, end); }
+    if start >= end {
+        anyhow::bail!("Region start must be less than end ({} >= {})", start, end);
+    }
     if common.verbose {
-        eprintln!("[DEBUG] Parsed region: chr={}, start={}, end={}", chr, start, end);
+        eprintln!(
+            "[DEBUG] Parsed region: chr={}, start={}, end={}",
+            chr, start, end
+        );
     }
     Ok((*chr, start, end))
 }
@@ -133,18 +156,27 @@ fn parse_bed_file(
     let file = File::open(bed_path)?;
     let mmap = unsafe { Mmap::map(&file)? };
     let mut regions = Vec::new();
+
     for line in mmap.split(|&b| b == b'\n') {
-        if line.is_empty() || line[0] == b'#' { continue; }
+        if line.is_empty() || line[0] == b'#' {
+            continue;
+        }
         let line_str = std::str::from_utf8(line)?;
         let mut parts = line_str.split_ascii_whitespace();
-        if let (Some(seq), Some(s), Some(e)) = (parts.next(), parts.next(), parts.next()) {
-            if let Some(&chr) = seqid_map.get(seq) {
-                let start = parse::<u32>(s.as_bytes())?;
-                let end = parse::<u32>(e.as_bytes())?;
-                regions.push((chr, start, end));
-            }
-        }
+
+        let (Some(seq), Some(s), Some(e)) = (parts.next(), parts.next(), parts.next()) else {
+            continue;
+        };
+
+        let Some(&chr) = seqid_map.get(seq) else {
+            continue;
+        };
+
+        let start = parse::<u32>(s.as_bytes())?;
+        let end = parse::<u32>(e.as_bytes())?;
+        regions.push((chr, start, end));
     }
+
     if common.verbose {
         eprintln!("[DEBUG] Parsed {} regions from BED file", regions.len());
     }
@@ -162,25 +194,32 @@ pub struct IndexData {
 impl IndexData {
     pub fn load(index_prefix: &Path, common: &CommonArgs) -> Result<Self> {
         let (seqids, _) = load_sqs(index_prefix)?;
-        let seqid_to_num = seqids.into_iter().enumerate().map(|(i, sq)| (sq, i as u32)).collect();
+        let seqid_to_num = seqids
+            .into_iter()
+            .enumerate()
+            .map(|(i, sq)| (sq, i as u32))
+            .collect();
         let rit_path = append_suffix(index_prefix, ".rit");
         let rix_path = append_suffix(index_prefix, ".rix");
         let chr_entries = Self::load_region_index(&rit_path, &rix_path)?;
-        Ok(Self { chr_entries, seqid_to_num, common: common.clone() })
+        Ok(Self {
+            chr_entries,
+            seqid_to_num,
+            common: common.clone(),
+        })
     }
 
     fn load_region_index(
         rit_path: &Path,
         rix_path: &Path,
-    ) -> Result<FxHashMap<u32, IntervalTree<u32>>>
-    {
+    ) -> Result<FxHashMap<u32, IntervalTree<u32>>> {
         let mut reader = BufReader::new(File::open(rit_path)?);
-    
+
         let offsets: Vec<u64> = {
             let f = File::open(rix_path)?;
             serde_json::from_reader(f)?
         };
-    
+
         let mut map = FxHashMap::with_capacity_and_hasher(offsets.len(), Default::default());
         for (i, &offset) in offsets.iter().enumerate() {
             reader.seek(SeekFrom::Start(offset))?;
@@ -195,7 +234,10 @@ impl IndexData {
 pub fn run(args: &IntersectArgs) -> Result<()> {
     let start_all = std::time::Instant::now();
     if args.common.verbose {
-        eprintln!("[INFO] Loading regions from: {}", args.common.input.display());
+        eprintln!(
+            "[INFO] Loading regions from: {}",
+            args.common.input.display()
+        );
     }
 
     let (_, seqid_map) = load_sqs(&args.common.input)?;
@@ -216,11 +258,13 @@ pub fn run(args: &IntersectArgs) -> Result<()> {
         args.invert,
     )?;
 
-    let mut ids: Vec<u32> = feats.iter().map(|&( id, _, _)| id).collect();
-    ids.sort_unstable(); ids.dedup();
+    let mut ids: Vec<u32> = feats.iter().map(|&(id, _, _)| id).collect();
+    ids.sort_unstable();
+    ids.dedup();
 
     let gof = load_gof(&args.common.input)?;
-    let gof_map: FxHashMap<_, _> = gof.into_iter()
+    let gof_map: FxHashMap<_, _> = gof
+        .into_iter()
         .map(|e| (e.feature_id, (e.start_offset, e.end_offset)))
         .collect();
 
@@ -250,13 +294,16 @@ fn extract_gff_blocks(
     let mmap = unsafe { Mmap::map(&file)? };
     let mut out: Box<dyn Write> = match output {
         Some(p) => Box::new(File::create(p)?),
-        None    => Box::new(std::io::stdout()),
+        None => Box::new(std::io::stdout()),
     };
-    
+
     if verbose {
-        eprintln!("[DEBUG] Extracting GFF blocks for {} features", feature_ids.len());
+        eprintln!(
+            "[DEBUG] Extracting GFF blocks for {} features",
+            feature_ids.len()
+        );
     }
-    
+
     let mut extracted = 0;
     for &id in feature_ids {
         if let Some(&(s, e)) = gof_map.get(&id) {

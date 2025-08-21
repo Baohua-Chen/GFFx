@@ -1,2 +1,2 @@
-pub mod utils;
+pub mod common;
 pub mod serial_interval_trees;
