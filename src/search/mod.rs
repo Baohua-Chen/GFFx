@@ -46,11 +46,20 @@ pub struct SearchArgs {
 }
 
 pub fn run(args: &SearchArgs) -> Result<()> {
-    // 配置 Rayon 线程数（只设置一次全局线程池）
-    rayon::ThreadPoolBuilder::new()
-        .num_threads(args.common.threads)
-        .build_global()
-        .ok(); // 已设置过时会返回 Err，这里忽略
+    let verbose = args.common.verbose;
+    if !args.common.full_model {
+        eprintln!(
+            "[WARN] Non full-model mode is not yet implemented. Full-model results will be returned."
+        );
+    };
+    // Build thread pool
+    args.common.init_rayon();
+    if verbose {
+        eprintln!(
+            "[DEBUG] Thread pool initialized with {} threads",
+            args.common.effective_threads()
+        );
+    }
 
     // 收集属性值：来自文件或单值
     let attr_values: Vec<String> = if let Some(file) = &args.attr_list {
