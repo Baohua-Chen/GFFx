@@ -146,7 +146,6 @@ Optional
 | `-F`, `--full-model`        | Enable the "full-model" mode, which whill return the non-redundant gene models |
 |                               for all matched features, instead of only the directly matched features.       |
 | `-T`, `--types` `<TYPES>`   | Filter output to include only features of specified types (e.g., `gene,exon`)  |
-| `-d`, `--descendants-only`  | Only extract feature(s) and their/its descendants                              |
 | `-V`, `--verbose`           | Enable verbose output                                                          |
 | `-h`, `--help`              | Show help message                                                              |
 ---
