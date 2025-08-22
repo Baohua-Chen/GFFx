@@ -108,7 +108,7 @@ Optional
 | -------------------------   | ------------------------------------------------------------------------------ |
 | `-o`, `--output` `<OUT>`    | Output file path (default: stdout)                                             |
 | `-F`, `--full-model`        | Enable the "full-model" mode, which whill return the non-redundant gene models |
-|                               for all matched features, instead of only the directly matched features.       |
+|                             | for all matched features, instead of only the directly matched features.       |
 | `-v`, `--invert`            | Invert selection (exclude matched features)                                    |
 | `-T`, `--types` `<TYPES>`   | Filter output to include only features of specified types (e.g., `gene,exon`)  |
 | `-t`, `--threads` `<NUM>`   | Number of threads [default: 12]                                                |
@@ -144,7 +144,7 @@ Optional
 | -------------------------   | ------------------------------------------------------------------------------ |
 | `-o`, `--output` `<OUT>`    | Output file path (default: stdout)                                             |
 | `-F`, `--full-model`        | Enable the "full-model" mode, which whill return the non-redundant gene models |
-|                               for all matched features, instead of only the directly matched features.       |
+|                             | for all matched features, instead of only the directly matched features.       |
 | `-T`, `--types` `<TYPES>`   | Filter output to include only features of specified types (e.g., `gene,exon`)  |
 | `-V`, `--verbose`           | Enable verbose output                                                          |
 | `-h`, `--help`              | Show help message                                                              |
