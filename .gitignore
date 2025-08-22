@@ -12,3 +12,5 @@ Thumbs.db
 
 # === Dependency lock file (optional, keep if you want reproducibility) ===
 Cargo.lock
+src/intersect/mod timing.rs
+src/utils/timing.rs
