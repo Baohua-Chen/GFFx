@@ -48,7 +48,7 @@ pub struct CommonArgs {
     #[arg(
         short = 't',
         long = "threads",
-        default_value_t = 8,
+        default_value_t = 12,
         value_name = "NUM",
         help = "Number of rayon threads (default: num_cpus)"
     )]
