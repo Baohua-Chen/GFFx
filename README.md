@@ -12,7 +12,7 @@ It can be used both as a **command-line tool** and as a **Rust library**.
 
 ## Table of Contents
 
-*GFFx version 0.2.0-**
+*GFFx version 0.3.0
 
 - [Installation](#installation)
 - [Basic Usage](#basic-usage)
@@ -106,9 +106,11 @@ Required
 Optional
 | Option                      | Description                                                                    |
 | -------------------------   | ------------------------------------------------------------------------------ |
-| `-o`, `--output` `<OUT>`       | Output file path (default: stdout)                                          |
+| `-o`, `--output` `<OUT>`    | Output file path (default: stdout)                                             |
+| `-F`, `--full-model`        | Enable the "full-model" mode, which whill return the non-redundant gene models <br>|                                for all matched features, instead of only the directly matched features.       |
 | `-v`, `--invert`            | Invert selection (exclude matched features)                                    |
 | `-T`, `--types` `<TYPES>`   | Filter output to include only features of specified types (e.g., `gene,exon`)  |
+| `-t`, `--threads` `<NUM>`   | Number of threads [default: 12]                                                |
 | `-V`, `--verbose`           | Enable verbose output                                                          |
 | `-h`, `--help`              | Show help message                                                              |
 | *(one of)*                  |                                                                                |
@@ -140,6 +142,7 @@ Optional
 | Option                      | Description                                                                    |
 | -------------------------   | ------------------------------------------------------------------------------ |
 | `-o`, `--output` `<OUT>`    | Output file path (default: stdout)                                             |
+| `-F`, `--full-model`        | Enable the "full-model" mode, which whill return the non-redundant gene models <br>|                                for all matched features, instead of only the directly matched features.       |
 | `-T`, `--types` `<TYPES>`   | Filter output to include only features of specified types (e.g., `gene,exon`)  |
 | `-d`, `--descendants-only`  | Only extract feature(s) and their/its descendants                              |
 | `-V`, `--verbose`           | Enable verbose output                                                          |
@@ -181,10 +184,10 @@ Optional
 gffx index -i genes.gff -a gene_name
 
 # Extract all features overlapping with a region
-gffx intersect --region chr1:10000-20000 -i genes.gff -o out.gff
+gffx intersect --region chr1:10000-20000 -i genes.gff -o out.gff -F
 
 # Extract models from a list of gene IDs
-gffx extract --feature-file genes.txt -i genes.gff -o subset.gff
+gffx extract --feature-file genes.txt -i genes.gff -o subset.gff -F
 
 # Search by gene name and extract the full model
 gffx search -a TP53 -i genes.gff -o tp53_model.gff
