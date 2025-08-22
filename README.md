@@ -12,7 +12,7 @@ It can be used both as a **command-line tool** and as a **Rust library**.
 
 ## Table of Contents
 
-*GFFx version 0.3.0
+*GFFx version 0.3.0*
 
 - [Installation](#installation)
 - [Basic Usage](#basic-usage)
@@ -107,7 +107,8 @@ Optional
 | Option                      | Description                                                                    |
 | -------------------------   | ------------------------------------------------------------------------------ |
 | `-o`, `--output` `<OUT>`    | Output file path (default: stdout)                                             |
-| `-F`, `--full-model`        | Enable the "full-model" mode, which whill return the non-redundant gene models <br>|                                for all matched features, instead of only the directly matched features.       |
+| `-F`, `--full-model`        | Enable the "full-model" mode, which whill return the non-redundant gene models |
+|                               for all matched features, instead of only the directly matched features.       |
 | `-v`, `--invert`            | Invert selection (exclude matched features)                                    |
 | `-T`, `--types` `<TYPES>`   | Filter output to include only features of specified types (e.g., `gene,exon`)  |
 | `-t`, `--threads` `<NUM>`   | Number of threads [default: 12]                                                |
@@ -142,7 +143,8 @@ Optional
 | Option                      | Description                                                                    |
 | -------------------------   | ------------------------------------------------------------------------------ |
 | `-o`, `--output` `<OUT>`    | Output file path (default: stdout)                                             |
-| `-F`, `--full-model`        | Enable the "full-model" mode, which whill return the non-redundant gene models <br>|                                for all matched features, instead of only the directly matched features.       |
+| `-F`, `--full-model`        | Enable the "full-model" mode, which whill return the non-redundant gene models |
+|                               for all matched features, instead of only the directly matched features.       |
 | `-T`, `--types` `<TYPES>`   | Filter output to include only features of specified types (e.g., `gene,exon`)  |
 | `-d`, `--descendants-only`  | Only extract feature(s) and their/its descendants                              |
 | `-V`, `--verbose`           | Enable verbose output                                                          |
