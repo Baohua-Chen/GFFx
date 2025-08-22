@@ -14,6 +14,15 @@ It can be used both as a **command-line tool** and as a **Rust library**.
 
 *GFFx version 0.3.0*
 
+---
+GFFx v0.3.0 is a **major release** , introducing important changes to default behavior, performance improvements, and bug fixes.
+
+## Breaking Changes
+- **Default extraction/intersection mode changed**:  
+  Non Full-Model Mode is now the default. To preserve the previous behavior (returning the entire gene model), users must explicitly pass the `-F` / `--full-model` flag.
+  Non Full-Model Mode and Full-Model Mode have **comparable runtime performance**.
+---
+
 - [Installation](#installation)
 - [Basic Usage](#basic-usage)
   - [index](#index) - Build index files
