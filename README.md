@@ -34,7 +34,7 @@ GFFx v0.3.0 is a **major release** , introducing important changes to default be
 - [Available Public APIs](#available-public-apis)
 - [Index File Types](#index-file-types)
 - [License](#license)
-- [Notes](#notes)
+- [Citation](#citation)
 
 ---
 ## Installation
@@ -316,5 +316,15 @@ fn main() -> Result<()> {
 ## License
 
 GFFx is released under the MIT or Apache-2.0 License.
+
+---
+
+## Citation
+
+If you use **GFFx**, please cite our preprint:
+
+Chen, B., Wu, D., & Zhang, G. (2025).  
+*GFFx: A Rust-based suite of utilities for ultra-fast genomic feature extraction*.  
+bioRxiv 2025.08.08.669426. https://doi.org/10.1101/2025.08.08.669426
 
 ---
