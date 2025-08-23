@@ -31,6 +31,7 @@ GFFx v0.3.0 is a **major release** , introducing important changes to default be
   - [search](#search) - Search features by attributes
 - [Example Use Cases](#example-use-cases)
 - [Using GFFx as a Rust Library](#using-gffx-as-a-rust-library)
+- [Available Public APIs] (#available-public-apis)
 - [Index File Types](#index-file-types)
 - [License](#license)
 - [Notes](#notes)
@@ -269,21 +270,21 @@ fn main() -> Result<()> {
 
 ---
 
-### Available Public APIs
+## Available Public APIs
 
-#### Index building & checking (`index_builder`)
+### Index building & checking (`index_builder`)
 - `build_index`
 
-#### Index loading (`index_loader`)
+### Index loading (`index_loader`)
 - `load_gof`, `load_prt`, `load_fts`, `load_atn`, `load_a2f`, `load_sqs`
 - `safe_mmap_readonly`
 - `GofEntry`, `PrtEntry`, `A2fEntry`
 
-#### Interval querying data structures (`utils::serial_interval_trees`)
+### Interval querying data structures (`utils::serial_interval_trees`)
 - `IntervalTree`, `Interval`
 - `save_multiple_trees`, `write_offsets_to_file`
 
-#### Other utilities (`utils::common`)
+### Other utilities (`utils::common`)
 - `CommonArgs` (for command-line compatibility)
 - `write_gff_output`, `check_index_files_exist`
 - `RootMatched`, `resolve_root`, `extract_root_matches`, `roots_to_offsets`
