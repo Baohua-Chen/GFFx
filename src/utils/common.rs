@@ -11,11 +11,6 @@ use std::{
     str,
 };
 
-pub fn append_suffix(path: &Path, suffix: &str) -> PathBuf {
-    let parent = path.parent().unwrap_or_else(|| Path::new(""));
-    let filename = path.file_name().unwrap_or_default().to_string_lossy();
-    parent.join(format!("{filename}{suffix}"))
-}
 
 #[derive(Debug, Clone, Parser)]
 pub struct CommonArgs {
@@ -89,6 +84,31 @@ impl CommonArgs {
     }
 }
 
+/* Append a suffix string to a given file path, returning the new path.
+
+    This is commonly used to generate paths for derived index files
+    (e.g., appending `.gof` or `.fts` to a GFF file path).
+
+    # Arguments
+    - `path`: The original file path.
+    - `suffix`: The string to append to the filename.
+
+    # Returns
+    A new `PathBuf` with the suffix added.
+
+    # Example
+    ```rust
+    # use std::path::Path;
+    # use your_crate::append_suffix;
+    let p = append_suffix(Path::new("/data/a.gff"), ".gof");
+    assert_eq!(p.to_string_lossy(), "/data/a.gff.gof");
+*/
+pub fn append_suffix(path: &Path, suffix: &str) -> PathBuf {
+    let parent = path.parent().unwrap_or_else(|| Path::new(""));
+    let filename = path.file_name().unwrap_or_default().to_string_lossy();
+    parent.join(format!("{filename}{suffix}"))
+}
+
 /// Write GFF header lines (starting with '#') to output
 /// Returns the byte position after the header
 pub fn write_gff_header<W: Write>(writer: &mut W, gff_buf: &[u8]) -> Result<usize> {
@@ -105,87 +125,22 @@ pub fn write_gff_header<W: Write>(writer: &mut W, gff_buf: &[u8]) -> Result<usiz
     Ok(pos)
 }
 
-/// Optimized write_gff_output: memory-maps input, merges adjacent/overlapping blocks,
-/// and uses buffered output to minimize syscalls.
-pub fn write_gff_output_old(
-    gff_path: &Path,
-    blocks: &[(u64, u64)],
-    output_path: &Option<std::path::PathBuf>,
-    _allowed_types: Option<&str>,
-    verbose: bool,
-) -> Result<()> {
-    // Open and mmap the GFF file
-    let file = File::open(gff_path)?;
-    let mmap = unsafe { Mmap::map(&file)? };
-
-    // Sort and merge blocks to reduce number of slices
-    let mut sorted = blocks.to_vec();
-    sorted.sort_unstable_by_key(|&(start, _)| start);
-    let mut merged = Vec::with_capacity(sorted.len());
-    let mut iter = sorted.into_iter();
-    if let Some((mut cur_start, mut cur_end)) = iter.next() {
-        for (start, end) in iter {
-            if start <= cur_end {
-                // overlapping or adjacent
-                cur_end = cur_end.max(end);
-            } else {
-                merged.push((cur_start, cur_end));
-                cur_start = start;
-                cur_end = end;
-            }
-        }
-        merged.push((cur_start, cur_end));
-    }
-
-    // Prepare buffered writer
-    let out_file: Box<dyn Write> = match output_path {
-        Some(p) => Box::new(BufWriter::new(File::create(p)?)),
-        None => Box::new(BufWriter::new(stdout())),
-    };
-    let mut writer = out_file;
-
-    // Collect IoSlice references
-    let mut slices: Vec<IoSlice> = Vec::with_capacity(merged.len());
-    for &(so, eo) in &merged {
-        let start = so as usize;
-        let len = (eo - so) as usize;
-        slices.push(IoSlice::new(&mmap[start..start + len]));
-    }
-
-    // Write all in one vectored syscall (or minimal syscalls)
-    let mut written = 0;
-    while written < slices.len() {
-        let nw = writer.write_vectored(&slices[written..])?;
-        // Determine how many IoSlices were fully written
-        let mut consumed = 0;
-        let mut remaining = nw;
-        for slice in &slices[written..] {
-            if remaining >= slice.len() {
-                remaining -= slice.len();
-                consumed += 1;
-            } else {
-                break;
-            }
-        }
-        written += consumed;
-        if consumed == 0 {
-            // fallback to basic write to make progress
-            let fallback = &slices[written][..];
-            let _ = writer.write(fallback)?;
-            written += 1;
-        }
-    }
-    writer.flush()?;
-
-    if verbose {
-        eprintln!(
-            "Wrote {} merged GFF block(s) with vectored I/O",
-            merged.len()
-        );
-    }
-    Ok(())
-}
-
+/// Write selected byte ranges ("blocks") of a GFF file to an output file or stdout.
+///
+/// Features:
+/// - Uses memory-mapped I/O for efficiency.
+/// - Merges adjacent or overlapping ranges before writing.
+/// - Uses vectored I/O (`write_vectored`) to minimize syscalls.
+///
+/// # Arguments
+/// - `gff_path`: Path to the source GFF file.
+/// - `blocks`: A list of `(start, end)` byte ranges to extract.
+/// - `output_path`: Output file path. If `None`, writes to stdout.
+/// - `_allowed_types`: Reserved for future filtering by feature type (currently unused).
+/// - `verbose`: Whether to print diagnostic output.
+///
+/// # Errors
+/// Returns any I/O or mmap errors.
 pub fn write_gff_output(
     gff_path: &Path,
     blocks: &[(u64, u64)],
@@ -193,17 +148,17 @@ pub fn write_gff_output(
     _allowed_types: Option<&str>,
     verbose: bool,
 ) -> Result<()> {
-    // 1) mmap
     let file = File::open(gff_path)?;
     let mmap = unsafe { Mmap::map(&file)? };
     let file_len = mmap.len();
-
-    // 2) sort + merge
+    
+    // sort and merge blocks
     let mut sorted = blocks.to_vec();
     sorted.sort_unstable_by_key(|&(s, _)| s);
 
     let mut merged: Vec<(u64, u64)> = Vec::with_capacity(sorted.len());
-    let mut it = sorted.into_iter();
+    let mut it = sorted.int
+o_iter();
     if let Some((mut cs, mut ce)) = it.next() {
         for (s, e) in it {
             if s <= ce {
@@ -221,10 +176,9 @@ pub fn write_gff_output(
         }
     }
 
-    // 3) 组装切片（同时做边界校验）
+    // build IoSlice list
     let mut slices: Vec<IoSlice<'_>> = Vec::with_capacity(merged.len());
     for &(so, eo) in &merged {
-        // 边界检查
         if so >= eo {
             continue;
         }
@@ -235,42 +189,33 @@ pub fn write_gff_output(
         slices.push(IoSlice::new(&mmap[start..end]));
     }
 
-    // 4) 打开输出
+    // Write in batches
     let mut writer: Box<dyn Write> = match output_path {
         Some(p) => Box::new(BufWriter::new(File::create(p)?)),
         None => Box::new(BufWriter::new(stdout())),
     };
 
-    // 5) 分批 + 处理部分写
-    //    为了正确处理部分写，我们维护 (batch_index, slice_index, intra_offset)
-    const MAX_IOV: usize = 1024; // 保守上限
+    const MAX_IOV: usize = 1024;
     let mut base = 0;
     while base < slices.len() {
         let end = (base + MAX_IOV).min(slices.len());
-        // 我们需要一个可变的“当前批次”指针序列，但 IoSlice 是不可变引用；
-        // partial write 时对第一个未完全写完的切片，改用标量 write 写剩余部分，然后再进入下一切片。
         let batch = &slices[base..end];
 
-        // 先尝试一次 vectored 写
         let nw = writer.write_vectored(batch)?;
         let mut remaining = nw;
         let mut i = 0;
 
-        // 计算完整消费了多少个切片
         while i < batch.len() && remaining >= batch[i].len() {
             remaining -= batch[i].len();
             i += 1;
         }
 
-        // 对第 i 个切片，如果有部分写，写完它的剩余部分
         if i < batch.len() && remaining > 0 {
             let cur = &batch[i];
-            // 已写 remaining，写剩余 cur.len()-remaining
             writer.write_all(&cur[remaining..])?;
             i += 1;
         }
 
-        // 继续把本批余下的切片逐个写完（不再用 vectored，避免再次处理复杂 partial write）
         for s in &batch[i..] {
             writer.write_all(s)?;
         }
@@ -289,7 +234,13 @@ pub fn write_gff_output(
     Ok(())
 }
 
-// Checks if all required index files exist
+/// Check if all expected index files for a given GFF exist.
+///
+/// Expected suffixes: `.gof`, `.fts`, `.prt`, `.sqs`, `.atn`, `.a2f`, `.rit`, `.rix`.
+///
+/// If any are missing:
+/// - If `rebuild = true`, rebuild the index in place and return `Ok(true)`.
+/// - Otherwise, return `Ok(false)`.
 pub fn check_index_files_exist(
     gff: &PathBuf,
     rebuild: bool,
@@ -318,11 +269,19 @@ pub fn check_index_files_exist(
     Ok(true)
 }
 
+/// A grouping of matched feature IDs under their root.
 pub struct RootMatched {
+    /// Root node numeric ID
     pub root: u32,
+    /// Matched numeric IDs that belong under this root
     pub matched: Vec<u32>,
 }
 
+/// Resolve the root of a feature ID by following parent links.
+///
+/// - If the parent points to itself, it's the root.
+/// - If no parent is found, treat it as a root.
+/// - If a cycle is detected, return an error.
 pub fn resolve_root(start: u32, prt_map: &FxHashMap<u32, u32>) -> Result<u32> {
     let mut current = start;
     let mut visited = FxHashSet::default();
@@ -340,6 +299,15 @@ pub fn resolve_root(start: u32, prt_map: &FxHashMap<u32, u32>) -> Result<u32> {
     )
 }
 
+/// Group feature IDs by their resolved roots.
+///
+/// Converts string feature IDs into numeric IDs, resolves their root
+/// via `resolve_root`, and then groups them under each root.
+///
+/// Uses Rayon parallelism if `threads > 1` and more than 2 features.
+///
+/// # Returns
+/// A `Vec<RootMatched>`, each containing one root and its matched descendants.
 pub fn extract_root_matches(
     feature_ids: &FxHashSet<String>,
     fts_map: &FxHashMap<&str, u32>,
@@ -381,6 +349,12 @@ pub fn extract_root_matches(
     out
 }
 
+/// Map root IDs to their byte offsets in the GFF file.
+///
+/// Looks up each root in a `gof_map` and returns its `(start, end)` offsets.
+///
+/// # Returns
+/// A list of `(root_id, start_offset, end_offset)` tuples.
 pub fn roots_to_offsets(
     roots: &[u32],
     gof_map: &FxHashMap<u32, (u64, u64)>,
