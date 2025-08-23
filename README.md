@@ -135,7 +135,7 @@ Optional
 Extracts annotation models by feature ID(s), including their parent models.
 
 ```bash
-gffx extract [OPTIONS] --input <INPUT> <--feature-file <FEATURE_FILE>|--feature-id <FEATURE_ID>>```
+gffx extract [OPTIONS] --input <INPUT> <--feature-file <FEATURE_FILE>|--feature-id <FEATURE_ID>>
 ```
 
 **Options:**
