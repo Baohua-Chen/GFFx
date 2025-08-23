@@ -283,13 +283,10 @@ fn main() -> Result<()> {
 - `IntervalTree`, `Interval`
 - `save_multiple_trees`, `write_offsets_to_file`
 
-#### Other utilities (`utils`)
-- `write_gff_output`
-- `check_index_files_exist`
-- `append_suffix`
-
-#### Command-line compatibility
-- `CommonArgs`
+#### Other utilities (`utils::common`)
+- `CommonArgs` (for command-line compatibility)
+- `write_gff_output`, `check_index_files_exist`
+- `RootMatched`, `resolve_root`, `extract_root_matches`, `roots_to_offsets`
 
 ---
 
