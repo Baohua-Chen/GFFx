@@ -1,14 +1,12 @@
 use anyhow::Result;
-use std::{
-    io::{Write, Seek, Read, SeekFrom, BufWriter, BufReader},
-    fs::{File, write},
-    str};
-use serde::{
-    Serialize, 
-    Deserialize, 
-    de::DeserializeOwned};
+use bincode2::{deserialize, deserialize_from, serialize, serialize_into};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json;
-use bincode2::{serialize_into, serialize, deserialize, deserialize_from};
+use std::{
+    fs::{File, write},
+    io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write},
+    str,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Interval<T: Ord + Copy> {
@@ -150,27 +148,19 @@ pub fn save_multiple_trees<T: Ord + Copy + Serialize>(
         let pos = writer.stream_position()?;
         offsets.push(pos);
 
-        serialize_into(&mut writer, tree)
-            .expect("Failed to serialize tree");
+        serialize_into(&mut writer, tree).expect("Failed to serialize tree");
     }
 
     writer.flush()?;
     Ok(offsets)
 }
 
-pub fn write_offsets_to_file(
-    offsets: &[u64],
-    path: &str
-) -> Result<()> {
-    let json = serde_json::to_string_pretty(offsets)
-        .expect("Serialize offsets failed");
+pub fn write_offsets_to_file(offsets: &[u64], path: &str) -> Result<()> {
+    let json = serde_json::to_string_pretty(offsets).expect("Serialize offsets failed");
     Ok(write(path, json)?)
 }
 
-pub fn load_multiple_trees<T>(
-    rit_path: &str,
-    rix_path: &str,
-) -> Result<Vec<IntervalTree<T>>>
+pub fn load_multiple_trees<T>(rit_path: &str, rix_path: &str) -> Result<Vec<IntervalTree<T>>>
 where
     T: Ord + Copy + DeserializeOwned,
 {

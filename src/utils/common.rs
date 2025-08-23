@@ -11,7 +11,6 @@ use std::{
     str,
 };
 
-
 #[derive(Debug, Clone, Parser)]
 pub struct CommonArgs {
     /// Input GFF file path
@@ -151,14 +150,13 @@ pub fn write_gff_output(
     let file = File::open(gff_path)?;
     let mmap = unsafe { Mmap::map(&file)? };
     let file_len = mmap.len();
-    
+
     // sort and merge blocks
     let mut sorted = blocks.to_vec();
     sorted.sort_unstable_by_key(|&(s, _)| s);
 
     let mut merged: Vec<(u64, u64)> = Vec::with_capacity(sorted.len());
-    let mut it = sorted.int
-o_iter();
+    let mut it = sorted.into_iter();
     if let Some((mut cs, mut ce)) = it.next() {
         for (s, e) in it {
             if s <= ce {
