@@ -1,5 +1,12 @@
 # GFFx Changelog
 
+Release v0.3.1:
+
+### Changed
+- To avoid short option conflicts in `extract`, renamed:
+  - `-f` (feature id) -> `-e`
+  - `-F` (feature file) -> `-E`
+
 ---
 
 Release v0.3.0 is a **major release** of GFFx, introducing important changes to default behavior, performance improvements, and bug fixes.

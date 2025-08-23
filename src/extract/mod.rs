@@ -30,10 +30,10 @@ pub struct ExtractArgs {
     #[clap(flatten)]
     pub common: CommonArgs,
 
-    #[arg(short = 'f', long, group = "feature")]
+    #[arg(short = 'e', long, group = "feature")]
     pub feature_id: Option<String>,
 
-    #[arg(short = 'F', long, group = "feature")]
+    #[arg(short = 'E', long, group = "feature")]
     pub feature_file: Option<PathBuf>,
 }
 
