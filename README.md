@@ -31,7 +31,7 @@ GFFx v0.3.0 is a **major release** , introducing important changes to default be
   - [search](#search) - Search features by attributes
 - [Example Use Cases](#example-use-cases)
 - [Using GFFx as a Rust Library](#using-gffx-as-a-rust-library)
-- [Available Public APIs] (#available-public-apis)
+- [Available Public APIs](#available-public-apis)
 - [Index File Types](#index-file-types)
 - [License](#license)
 - [Notes](#notes)
