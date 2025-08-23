@@ -151,8 +151,8 @@ Required
 | ---------------------------------------- | ------------------------------------------------------------ |
 | `-i`, `--input` `<INPUT>`                | Input GFF file path                                          |
 | *(one of)*                               |                                                              |
-| `-f`, `--feature-id` `<FEATURE_ID>`      | Extrach by a single feature id                               |
-| `-F`, `--feature-file` `<FEATURE_FILE>`  | Extrach by a BED file containing multiple regions            |
+| `-e`, `--feature-id` `<FEATURE_ID>`      | Extrach by a single feature id                               |
+| `-E`, `--feature-file` `<FEATURE_FILE>`  | Extrach by a BED file containing multiple regions            |
 
 Optional
 | Option                      | Description                                                                    |
