@@ -1,5 +1,14 @@
 # GFFx Changelog
 
+Release v0.3.2:
+
+## Architectural Optimization
+- Unified the parsing of various index files under a set of independent and consistently designed structures and modules
+## Bug Fixes
+- `-F, --full-model, -F` and `-T, --types` are now conflics with each other. This change ensures consistency with the actual code logic.
+
+---
+
 Release v0.3.1:
 
 ### Changed
