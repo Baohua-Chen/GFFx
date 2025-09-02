@@ -9,13 +9,17 @@ pub mod intersect;
 pub mod search;
 
 pub use index_builder::core::build_index;
-pub use index_loader::core::{
-    A2fEntry, GofEntry, PrtEntry, load_a2f, load_atn, load_fts, load_gof, load_prt, load_sqs,
-    safe_mmap_readonly,
+pub use index_loader::{
+    core::{load_atn, load_sqs, safe_mmap_readonly},
+    gof::{GofMap, load_gof},
+    fts::{FtsMap, load_fts},
+    prt::{PrtMap, load_prt},
+    a2f::{A2fMap, load_a2f}
 };
+
+
 pub use utils::common::{
-    CommonArgs, RootMatched, append_suffix, check_index_files_exist, extract_root_matches,
-    roots_to_offsets, write_gff_output,
+    CommonArgs, append_suffix, check_index_files_exist, write_gff_output, write_gff_output_filtered,
 };
 pub use utils::serial_interval_trees::{
     Interval, IntervalTree, save_multiple_trees, write_offsets_to_file,

@@ -1,6 +1,6 @@
 [package]
 name = "gffx"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2024"
 authors = ["Baohua Chen <cbh1117.163.com>"]
 description = "An ultra-fast and memory-efficient toolkit for querying GFF files, written with Rust"

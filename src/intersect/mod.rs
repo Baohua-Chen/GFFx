@@ -14,8 +14,7 @@ use std::{
 };
 
 use crate::{
-    CommonArgs, Interval, IntervalTree, append_suffix, load_gof, load_sqs, roots_to_offsets,
-    write_gff_output,
+    CommonArgs, Interval, IntervalTree, append_suffix, load_gof, load_sqs, write_gff_output,
 };
 
 /// Number of IoSlices per batch writer
@@ -164,7 +163,7 @@ enum OverlapMode {
     Overlap,
 }
 
-fn gff_type_allowed(line: &[u8], allow: &FxHashSet<String>) -> bool {
+pub fn gff_type_allowed(line: &[u8], allow: &FxHashSet<String>) -> bool {
     // Fast parse the 3rd field (type) without allocations
     let mut off = 0usize;
     let mut tabs = 0u8;
@@ -189,7 +188,7 @@ fn gff_type_allowed(line: &[u8], allow: &FxHashSet<String>) -> bool {
 }
 
 /// Core feature query logic using interval trees
-fn query_features(
+pub fn query_features(
     index_data: &IndexData,
     regions: Vec<(u32, u32, u32)>,
     contained: bool,
@@ -250,7 +249,7 @@ fn query_features(
 }
 
 /// Parse a single genomic region string (chr:start-end)
-fn parse_region(
+pub fn parse_region(
     region: &str,
     seqid_map: &FxHashMap<String, u32>,
     common: &CommonArgs,
@@ -279,7 +278,7 @@ fn parse_region(
 }
 
 /// Parse BED file using mmap zero-copy field splitting
-fn parse_bed_file(
+pub fn parse_bed_file(
     bed_path: &Path,
     seqid_map: &FxHashMap<String, u32>,
 ) -> Result<Vec<(u32, u32, u32)>> {
@@ -311,7 +310,7 @@ fn parse_bed_file(
 }
 
 /// Filter and output by coordinates
-fn write_gff_match_only_by_coords(
+pub fn write_gff_match_only_by_coords(
     gff_path: &Path,
     blocks: &[(u32, u64, u64)], //Per-block parallel scan to collect (line_start, line_end) offsets
     query_ivmap: &FxHashMap<String, Vec<(u32, u32)>>,
@@ -515,7 +514,7 @@ fn write_gff_match_only_by_coords(
 }
 
 /// Parse the 3rd column (type) of GFF and check against the set
-fn gff_line_overlaps_queries(line: &[u8], ivmap: &FxHashMap<String, Vec<(u32, u32)>>) -> bool {
+pub fn gff_line_overlaps_queries(line: &[u8], ivmap: &FxHashMap<String, Vec<(u32, u32)>>) -> bool {
     // Parse first 5 columns quickly: seq, source, type, start, end
     let mut off = 0usize;
 
@@ -631,42 +630,29 @@ pub fn run(args: &IntersectArgs) -> Result<()> {
     };
 
     // Collect IDs for root features only
-    let ids: Vec<u32> = {
-        let mut ids: Vec<u32> = feats.iter().map(|&(id, _, _)| id).collect();
-        ids.sort_unstable();
-        ids.dedup();
-        ids
-    };
-
-    let gof_map: FxHashMap<_, _> = {
-        let gof = load_gof(&args.common.input)?;
-        gof.into_iter()
-            .map(|e| (e.feature_id, (e.start_offset, e.end_offset)))
+    let gof = load_gof(&args.common.input)?;
+    let root_matches: Vec<RootMatched> = {
+        let mut grouped: FxHashMap<u32, Vec<u32>> = FxHashMap::default();
+        for &(root, _s, _e) in &feats {
+            grouped.entry(root).or_default().push(root);
+        }
+        grouped
+            .into_iter()
+            .map(|(root, matched)| RootMatched { root, matched })
             .collect()
     };
 
-    if !args.common.full_model {
-        let root_matches: Vec<RootMatched> = {
-            let mut grouped: FxHashMap<u32, Vec<u32>> = FxHashMap::default();
-            for &(root, _s, _e) in &feats {
-                grouped.entry(root).or_default().push(root);
-            }
-            grouped
-                .into_iter()
-                .map(|(root, matched)| RootMatched { root, matched })
-                .collect()
-        };
+    let roots: Vec<u32> = {
+        let mut s: FxHashSet<u32> = FxHashSet::default();
+        for rm in &root_matches {
+            s.insert(rm.root);
+        }
+        s.into_iter().collect()
+    };
 
-        let roots: Vec<u32> = {
-            let mut s: FxHashSet<u32> = FxHashSet::default();
-            for rm in &root_matches {
-                s.insert(rm.root);
-            }
-            s.into_iter().collect()
-        };
+    let blocks: Vec<(u32, u64, u64)> = gof.roots_to_offsets(&roots, args.common.effective_threads());
 
-        let blocks: Vec<(u32, u64, u64)> = { roots_to_offsets(&roots, &gof_map) };
-
+    if !args.common.full_model || args.common.types.is_some() {
         // Build query interval map by seq name
         let query_ivmap: FxHashMap<String, Vec<(u32, u32)>> = {
             let mut num_to_seq: FxHashMap<u32, String> = FxHashMap::default();
@@ -693,32 +679,12 @@ pub fn run(args: &IntersectArgs) -> Result<()> {
             )?;
         }
     } else {
-        // Non -M mode: continue using the "write_gff_output" function imported from  the "utils" mod
-        let blocks: Vec<(u64, u64)> = {
-            let mut blocks: Vec<(u64, u64)> = Vec::with_capacity(ids.len());
-            for &id in &ids {
-                if let Some(&(s, e)) = gof_map.get(&id) {
-                    if s < e {
-                        blocks.push((s, e));
-                    } else if verbose {
-                        eprintln!("[WARNING] Invalid offsets for feature {}: {}..{}", id, s, e);
-                    }
-                } else if verbose {
-                    eprintln!("[WARNING] Feature ID {} not found in GOF map", id);
-                }
-            }
-            blocks
-        };
-
-        {
-            write_gff_output(
-                args.common.input.as_path(),
-                &blocks,
-                &args.common.output,
-                args.common.types.as_deref(),
-                args.common.verbose,
-            )?;
-        }
+        write_gff_output(
+            args.common.input.as_path(),
+            &blocks,
+            &args.common.output,
+            args.common.verbose,
+        )?;
     }
     Ok(())
 }

@@ -41,7 +41,7 @@ pub fn build_index(gff: &PathBuf, attr_key: &str, verbose: bool) -> Result<()> {
     // Compile regex patterns
     let id_re = Regex::new(r"ID=([^;\s]+)")?;
     let parent_re = Regex::new(r"Parent=([^;\s]+)")?;
-    let attr_re = Regex::new(&format!(r"{}=([^;\s]+)", escape(attr_key)))?;
+    let attr_re = Regex::new(&format!(r"{}=([^;]+)", escape(attr_key)))?;
 
     if verbose {
         eprintln!("Building index for {} ...", gff.display());
@@ -98,8 +98,16 @@ pub fn build_index(gff: &PathBuf, attr_key: &str, verbose: bool) -> Result<()> {
         // Extract raw Parent (may refer to unseen ID)
         let parent = parent_re.captures(line).map(|cap| cap[1].to_string());
         // Extract attribute value
-        let attr = attr_re.captures(line).map(|cap| cap[1].to_string());
-
+        let attr = attr_re.captures(line).map(|cap| {
+            let val = cap[1].to_string();       
+            // GFF3 spec: attribute values must be URL-encoded.
+            // Raw characters such as space, semicolon, or comma are not allowed.
+            if val.contains(' ') || val.contains(';') || val.contains(',') {
+                eprintln!("[WARN] Attribute value contains invalid chars (.,;) (should be URL-encoded): in '{}'", val);
+            }
+            val
+        });
+        
         raw_features.push(RawFeature {
             seqid,
             start,

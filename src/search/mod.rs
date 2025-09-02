@@ -1,16 +1,18 @@
 use anyhow::{Result, bail};
 use clap::{ArgGroup, Parser};
-use rayon::prelude::*;
+use rustc_hash::{FxHashMap, FxHashSet};
 use regex::Regex;
 use std::{
-    collections::{HashMap, HashSet},
     fs::File,
-    io::{BufRead, BufReader, Write},
+    io::{BufReader, BufRead},
     path::PathBuf,
+    time::Instant,
 };
 
+
 use crate::{
-    CommonArgs, GofEntry, load_a2f, load_atn, load_fts, load_gof, load_prt, safe_mmap_readonly,
+    CommonArgs, load_gof, load_prt, load_a2f, load_atn,
+    write_gff_output, write_gff_output_filtered,
 };
 
 #[derive(Parser, Debug)]
@@ -41,156 +43,210 @@ pub struct SearchArgs {
     )]
     attr: Option<String>,
 
-    #[arg(short = 'r', long, help = "Enable regex mode for attribute matching")]
+    #[arg(
+        short = 'r',
+        long,
+        help = "Enable regex mode for attribute matching")]
     regex: bool,
 }
 
+/// When `--full-model` is OFF: within each root block, emit only lines whose `ID` exactly matches
+/// the user-specified features under that root. Optional `types_filter` is applied to column 3.
 pub fn run(args: &SearchArgs) -> Result<()> {
     let verbose = args.common.verbose;
-    if !args.common.full_model {
-        eprintln!(
-            "[WARN] Non full-model mode is not yet implemented. Full-model results will be returned."
-        );
-    };
-    // Build thread pool
+    let gff_path = &args.common.input;
+
+    // Init thread pool
     args.common.init_rayon();
+    let overall_start = Instant::now();
     if verbose {
+        eprintln!("[DEBUG] Starting processing of {:?}", gff_path);
         eprintln!(
             "[DEBUG] Thread pool initialized with {} threads",
             args.common.effective_threads()
         );
     }
 
-    // 收集属性值：来自文件或单值
+    // Load index artifacts
+    let prt = load_prt(gff_path)?;          // parent pointers (fid -> parent fid)
+    let gof = load_gof(gff_path)?;          // GOF offsets (fid -> (start,end))
+    let a2f = load_a2f(gff_path)?;          // attribute index -> fid
+    let (atn_attr_name, atn_values) = load_atn(gff_path)?; // attribute values table (index-aligned)
+
+    // Collect attribute values from file or single arg
     let attr_values: Vec<String> = if let Some(file) = &args.attr_list {
         let reader = BufReader::new(File::open(file)?);
         reader
-            .lines() // Iterator<Item = io::Result<String>>
-            .map(|r| r.map(|s| s.trim().to_owned())) // trim
+            .lines()
+            .map(|r| r.map(|s| s.trim().to_owned()))
             .filter(|r| r.as_ref().map_or(true, |s| !s.is_empty()))
-            .collect::<Result<Vec<_>, _>>()? // 遇到 Err 直接返回
+            .collect::<Result<Vec<_>, _>>()?
     } else if let Some(val) = &args.attr {
         vec![val.clone()]
     } else {
         bail!("Either --attr-list (-A) or --attr (-a) must be provided.");
     };
 
-    // 载入索引与原文件缓冲
-    let gff_buf = safe_mmap_readonly(&args.common.input)?;
-    let (atn_attr_name, atn_values) = load_atn(&args.common.input)?;
-    let a2f = load_a2f(&args.common.input)?;
-    let prt = load_prt(&args.common.input)?;
-    let gof = load_gof(&args.common.input)?;
-    let fts = load_fts(&args.common.input)?;
-
-    // 索引一致性检查
-    if a2f.len() != prt.len() {
-        bail!(
-            "Index error: a2f and prt length mismatch ({} vs {}). Possible feature registration inconsistency.",
-            a2f.len(),
-            prt.len()
-        );
-    }
-    for (i, entry) in prt.iter().enumerate() {
-        if (entry.parent as usize) >= prt.len() {
-            bail!(
-                "Index error: feature {} refers to non-existent parent {}",
-                i,
-                entry.parent
-            );
-        }
-    }
-
-    // 快速按 feature_id 查 GOF
-    let gof_map: HashMap<u32, GofEntry> = gof.into_iter().map(|e| (e.feature_id, e)).collect();
-
-    // 将“待匹配的属性值”映射到其 attr_id 列表
-    let mut attr_to_ids: HashMap<String, Vec<u32>> = HashMap::new();
-
+    // Step 1: build attribute -> AID list
+    // In regex mode, match by regex; otherwise exact string match.
+    let mut attr_to_aids: FxHashMap<String, Vec<u32>> = FxHashMap::default();
     if args.regex {
-        // 正确把 Vec<String> -> Vec<Regex>
         let patterns: Vec<Regex> = attr_values
             .iter()
-            .map(String::as_str) // &String -> &str
+            .map(String::as_str)
             .map(Regex::new)
             .collect::<std::result::Result<Vec<_>, _>>()?;
 
         for (i, val) in atn_values.iter().enumerate() {
             if patterns.iter().any(|re| re.is_match(val)) {
-                attr_to_ids.entry(val.clone()).or_default().push(i as u32);
+                attr_to_aids.entry(val.clone()).or_default().push(i as u32);
             }
         }
     } else {
-        // O(1) 集合查找
-        let wanted: HashSet<&str> = attr_values.iter().map(String::as_str).collect();
+        let wanted: FxHashSet<&str> = attr_values.iter().map(String::as_str).collect();
         for (i, val) in atn_values.iter().enumerate() {
             if wanted.contains(val.as_str()) {
-                attr_to_ids.entry(val.clone()).or_default().push(i as u32);
+                attr_to_aids.entry(val.clone()).or_default().push(i as u32);
             }
         }
     }
 
-    if attr_to_ids.is_empty() {
-        bail!(
-            "None of the attributes matched. Index was built with attribute: {}",
-            atn_attr_name
-        );
+    // Nothing matched → early exit with a helpful error
+    if attr_to_aids.is_empty() {
+        bail!("None of the attributes matched.");
     }
 
-    // 并行构造输出块
-    let results: Vec<String> = attr_to_ids
-        .par_iter()
-        .map(|(attr, attr_ids)| {
-            let mut roots_seen = HashSet::new();
-            let mut lines = Vec::new();
+    if verbose {
+        eprintln!("[DEBUG] Matched attribute -> AIDs:");
+        for (attr_val, aids) in &attr_to_aids {
+            eprintln!("  {} => {:?}", attr_val, aids);
+        }
+    }
 
-            for &aid in attr_ids {
-                // 遍历 a2f 上所有具有该 attr_id 的要素
-                for a2f_entry in a2f.iter().filter(|e| e.attr_id == aid) {
-                    let matched_fid = a2f_entry.feature_id;
+    // Step 2: map AIDs -> FIDs via a2f (attribute index to feature id)
+    // Note: a2f is expected to be indexable by AID (usize).
+    // We also deduplicate per attribute to keep vectors lean.
+    let mut attr_to_fids: FxHashMap<String, Vec<u32>> = FxHashMap::default();
+    
+    for (attr_val, aids) in &attr_to_aids {
+        let mut fids = a2f.map_aids_to_fids_vec(aids);
+        fids.sort_unstable();
+        fids.dedup();
+    
+        if !fids.is_empty() {
+            attr_to_fids.insert(attr_val.clone(), fids);
+        }
+    }
 
-                    // 找祖先根（parent == self）
-                    let mut fid = matched_fid;
-                    while prt[fid as usize].parent != fid {
-                        fid = prt[fid as usize].parent;
-                    }
+    if attr_to_fids.is_empty() {
+        bail!("No feature IDs (FIDs) resolved from matched attributes.");
+    }
 
-                    // 重复的根模型跳过
-                    if !roots_seen.insert(fid) {
-                        continue;
-                    }
+    if verbose {
+        eprintln!("[DEBUG] Attribute -> FIDs after a2f mapping:");
+        for (attr_val, fids) in &attr_to_fids {
+            eprintln!("  {} => {:?} ", attr_val, fids);
+        }
+    }
 
-                    // 取该根模型对应 GOF 区块，没有就跳过
-                    let Some(entry) = gof_map.get(&fid) else {
-                        continue;
-                    };
+    // Step 3: map FIDs -> root FIDs using PrtMap::map_fids_to_roots (fast)
+    let mut fid_vec: Vec<u32> = attr_to_fids
+        .values()
+        .flat_map(|v| v.iter().copied())
+        .collect();
+    fid_vec.sort_unstable();
+    fid_vec.dedup();
 
-                    let slice = &gff_buf[entry.start_offset as usize..entry.end_offset as usize];
-                    let mut block = format!(
-                        "# match attribute: {} (via feature_id={} in model={})\n",
-                        attr,
-                        matched_fid,
-                        fts.get(fid as usize).unwrap_or(&"<unknown>".to_string())
-                    );
-                    let text = std::str::from_utf8(slice)
-                        .map_err(|_| anyhow::anyhow!("Invalid UTF-8 in extracted block"))?;
-                    block.push_str(text);
-                    lines.push(block);
+    if verbose {
+        eprintln!("[DEBUG] Total unique FIDs: {}", fid_vec.len());
+    }
+
+    let threads = args.common.effective_threads();
+    let root: Vec<u32> = prt.map_fids_to_roots(&fid_vec, threads);
+
+    // Collect invalid fids (mapped to u32::MAX), and build a unique root list
+    let mut invalid_fids: Vec<u32> = Vec::new();
+    let mut roots_effective: Vec<u32> = Vec::with_capacity(root.len());
+    for (&fid, r) in fid_vec.iter().zip(root.iter()) {
+        if *r == u32::MAX {
+            invalid_fids.push(fid);
+        } else {
+            roots_effective.push(*r);
+        }
+    }
+
+    if !invalid_fids.is_empty() {
+        invalid_fids.sort_unstable();
+        invalid_fids.dedup();
+        eprintln!(
+            "[WARN] {} FIDs have invalid parent chains (or out-of-range): {:?}",
+            invalid_fids.len(),
+            invalid_fids
+        );
+    }
+    roots_effective.sort_unstable();
+    roots_effective.dedup();
+
+    if roots_effective.is_empty() {
+        bail!("No valid root features resolved from matched attributes.");
+    }
+    if verbose {
+        eprintln!("[DEBUG] Total unique roots: {}", roots_effective.len());
+    }
+
+    let blocks: Vec<(u32, u64, u64)> = gof.roots_to_offsets(&roots_effective, args.common.effective_threads());
+    
+    if !args.common.full_model || args.common.types.is_some() {
+        let allowed_roots: FxHashSet<u32> = roots_effective.iter().copied().collect();
+        
+        let mut fid_to_root: FxHashMap<u32, u32> = FxHashMap::default();
+        fid_to_root.reserve(fid_vec.len());
+        for (fid, r) in fid_vec.iter().copied().zip(root.iter().copied()) {
+            if r != u32::MAX && allowed_roots.contains(&r) {
+                fid_to_root.insert(fid, r);
+            }
+        }
+        
+        let mut per_root_matches: FxHashMap<u32, FxHashSet<String>> = FxHashMap::default();
+        per_root_matches.reserve(roots_effective.len());
+        
+        for (attr_val, fids) in &attr_to_fids {
+            for &fid in fids {
+                if let Some(&r) = fid_to_root.get(&fid) {
+                    per_root_matches.entry(r).or_default().insert(attr_val.clone());
                 }
             }
+        }
 
-            Ok::<_, anyhow::Error>(lines.join(""))
-        })
-        .collect::<Result<Vec<_>>>()?;
+        write_gff_output_filtered(
+            gff_path,
+            &blocks,
+            &per_root_matches,
+            &atn_attr_name,
+            &args.common.output,
+            args.common.types.as_deref(),
+            verbose,
+        )?;
+    } else {
+        let mut fid_to_root: FxHashMap<u32, u32> = FxHashMap::default();
+        for (fid, r) in fid_vec.iter().copied().zip(root.clone().into_iter()) {
+            if r != u32::MAX {
+                fid_to_root.insert(fid, r);
+            }
+        }
+    
+        // Step 4: map roots -> (start, end) offsets from GOF
+        // Use a cached index to avoid rebuilding a HashMap on every call.
+        write_gff_output(
+            gff_path,
+            &blocks,
+            &args.common.output,
+            verbose,
+        )?;
+    }
 
-    // 输出
-    let out: Box<dyn Write> = match &args.common.output {
-        Some(path) => Box::new(File::create(path)?),
-        None => Box::new(std::io::stdout()),
-    };
-    let mut out = std::io::BufWriter::new(out);
-    for block in results {
-        out.write_all(block.as_bytes())?;
+    if verbose {
+        eprintln!("[timing] Total elapsed: {:?}", overall_start.elapsed());
     }
 
     Ok(())

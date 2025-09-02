@@ -2,29 +2,33 @@
 # GFFx Command Line Manual
 
 **GFFx** is a high-performance, Rust-based toolkit for extracting and querying annotations from GFF3 files. It supports fast indexing and feature retrieval with several subcommands.
-It can be used both as a **command-line tool** and as a **Rust library**.
+It can be used both as a **command-line tool** and as a **Rust library**. 
 
 <p align="center">
   <img src="extract.png" alt="Benchmarking results" width="600"/>
   <br>
-  <span>Benchmarking runtime and memory usage of ID-based feature extraction</span>
+  <em>Benchmarking runtime and memory usage of ID-based feature extraction</em>
 </p>
 
-## Table of Contents
-
-*GFFx version 0.3.1*
-
 ---
-GFFx v0.3.1 is a **major release** , introducing important changes to default behavior, performance improvements, and bug fixes.
 
 ## Breaking Changes
+
+Starting from GFFx v0.3.1 and all later versions, the following breaking changes are in effect. These changes introduce important updates to default behavior, improve performance, and fix bugs.
+   
 - **Default extraction/intersection mode changed**:  
-  Non Full-Model Mode is now the default. To preserve the previous behavior (returning the entire gene model), users must explicitly pass the `-F` / `--full-model` flag.
-  Non Full-Model Mode and Full-Model Mode have **comparable runtime performance**.
+  Feature-Only Mode is now the default. To preserve the previous behavior (returning the entire gene model), users must explicitly pass the `-F` / `--full-model` flag.
+  Feature-Only Mode and Full-Model Mode have **comparable runtime performance**.
 
 - **To avoid short option conflicts in `extract`, renamed:**
   - `-f` (feature id) ->`-e`
   - `-F` (feature file) -> `-E`
+
+---
+
+## Table of Contents
+
+*GFFx version 0.3.2*
 
 ---
 
@@ -161,8 +165,10 @@ Optional
 | `-F`, `--full-model`        | Enable the "full-model" mode, which whill return the non-redundant gene models |
 |                             | for all matched features, instead of only the directly matched features.       |
 | `-T`, `--types` `<TYPES>`   | Filter output to include only features of specified types (e.g., `gene,exon`)  |
+| `-t`, `--threads` `<NUM>`   | Number of threads [default: 12]                                                |
 | `-V`, `--verbose`           | Enable verbose output                                                          |
 | `-h`, `--help`              | Show help message                                                              |
+
 ---
 
 ### `search`
@@ -187,10 +193,14 @@ Optional
 | Option                      | Description                                                                    |
 | -------------------------   | ------------------------------------------------------------------------------ |
 | `-o`, `--output` `<OUT>`    | Output file path (default: stdout)                                             |
+| `-F`, `--full-model`        | Enable the "full-model" mode, which whill return the non-redundant gene models |
+|                             | for all matched features, instead of only the directly matched features.       |
 | `-r`, `--regex` `<REGEX>`   | Enable regex matching for attribute values                                     |
 | `-T`, `--types` `<TYPES>`   | Filter output to include only features of specified types (e.g., `gene,exon`)  |
+| `-t`, `--threads` `<NUM>`   | Number of threads [default: 12]                                                |
 | `-V`, `--verbose`           | Enable verbose output                                                          |
 | `-h`, `--help`              | Show help message                                                              |
+
 ---
 
 ## Example Use Cases
@@ -226,51 +236,38 @@ gffx = "^0.2.0" # Please check the latest version in crates.io
 The following example runs inside a main() -> Result<()> context:
 
 ```rust
-use anyhow::Result;
-use gffx::{
-    CommonArgs, IntersectArgs, IndexData, parse_region, query_features,
-    extract_gff_blocks, load_gof
-};
-use std::path::PathBuf;
-use rustc_hash::FxHashMap;
+use anyhow::{Result, bail};
+use std::path::Path; 
 
-fn main() -> Result<()> {
-    let input_path = PathBuf::from("example.gffx");
-    let region_str = "chr1:1000-2000";
+pub fn extract_one_id_full_model(                       // Define a minimal single-ID full-model extractor
+    gff_path: &Path,                                    // Path to the input GFF file
+    feature_id: &str,                                   // Target feature ID (string form)
+    out_path: &Path                                     // Path to the output GFF file
+) -> Result<()> {                                       // Return anyhow::Result for error propagation
+    let fts = load_fts(gff_path)?;                      // Load feature table: maps string IDs <-> numeric fids
+    let prt = load_prt(gff_path)?;                      // Load parent relations: map child fid -> root fid
+    let gof = load_gof(gff_path)?;                      // Load offsets: map root fid -> byte ranges in the file
 
-    let common = CommonArgs {
-        input: input_path.clone(),
-        output: None, // Write to stdout
-        verbose: true,
-    };
+    let (fid_set, missing) = fts.map_fnames_to_fids(    // Map the single feature name to a numeric fid via batch API
+        std::iter::once(feature_id.to_string()).collect(), // Build a one-element set of the feature name
+        1                                               // Use 1 thread since this is a single lookup
+    );                                                  
+    
+    let fid = *fid_set.iter().next().unwrap();          // Extract the only fid from the set
 
-    // Load sequence ID map
-    let (_, seqid_map) = gffx::load_sqs(&input_path)?;
+    let root = prt.map_fids_to_roots(&[fid], 1)[0];     // Map fid -> root fid using the batch API with a single item
 
-    // Parse the region string
-    let region = parse_region(&region_str, &seqid_map, &common)?;
+    let blocks = gof.roots_to_offsets(&[root], 1);      // Convert the root fid to file block offsets (full model span)
 
-    // Load the index data (interval trees)
-    let index_data = IndexData::load(&input_path, &common)?;
+    write_gff_output(                                   // Write the entire blocks (full-model output, no filtering)
+        gff_path,                                       // Input GFF file path
+        &blocks,                                        // Byte-range blocks to emit
+        out_path,                                       // Output file path
+        false                                           // Verbose: false for minimal logging
+    )?;                                                 
 
-    // Query features overlapping the region
-    let feats = query_features(&index_data, vec![region], false, false, false)?;
-
-    // Collect unique feature IDs
-    let mut ids: Vec<u32> = feats.iter().map(|&(id, _, _)| id).collect();
-    ids.sort_unstable(); ids.dedup();
-
-    // Load GFF Offset Format (.gof) file
-    let gof = load_gof(&input_path)?;
-    let gof_map: FxHashMap<_, _> = gof.into_iter()
-        .map(|e| (e.feature_id, (e.start_offset, e.end_offset)))
-        .collect();
-
-    // Extract GFF blocks from the indexed GFFx file
-    extract_gff_blocks(&input_path, &gof_map, &ids, &None, true)?;
-
-    Ok(())
-}
+    Ok(())                                              // Return success
+}                                                       // End of function
 ```
 
 ---
@@ -283,16 +280,16 @@ fn main() -> Result<()> {
 ### Index loading (`index_loader`)
 - `load_gof`, `load_prt`, `load_fts`, `load_atn`, `load_a2f`, `load_sqs`
 - `safe_mmap_readonly`
-- `GofEntry`, `PrtEntry`, `A2fEntry`
+- `GofMap`, `PrtMap`, `FtsMap`, `A2fMap`
 
 ### Interval querying data structures (`utils::serial_interval_trees`)
 - `IntervalTree`, `Interval`
 - `save_multiple_trees`, `write_offsets_to_file`
 
 ### Other utilities (`utils::common`)
-- `CommonArgs` (for command-line compatibility)
-- `write_gff_output`, `check_index_files_exist`
-- `RootMatched`, `resolve_root`, `extract_root_matches`, `roots_to_offsets`
+- `CommonArgs`, `append_suffix`
+- `write_gff_output`, `write_gff_output_filtered`
+- `check_index_files_exist`
 
 ---
 
