@@ -35,23 +35,15 @@ pub struct ExtractArgs {
 }
 
 pub fn run(args: &ExtractArgs) -> Result<()> {
-    let gff_path = &args.common.input;
-
     // Start overall timer
     let overall_start = Instant::now();
+
+    let gff_path = &args.common.input;
     let verbose = args.common.verbose;
     if verbose {
         eprintln!("[DEBUG] Starting processing of {:?}", gff_path);
     }
 
-    // Build thread pool
-    args.common.init_rayon();
-    if verbose {
-        eprintln!(
-            "[DEBUG] Thread pool initialized with {} threads",
-            args.common.effective_threads()
-        );
-    }
     // Load features
     let fts = load_fts(gff_path)?;
 
