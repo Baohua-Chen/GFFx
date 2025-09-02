@@ -10,7 +10,9 @@
 .DS_Store
 Thumbs.db
 
+# === Jupyter checkpoints ===
+.ipynb_checkpoints/
+**/.ipynb_checkpoints/
+
 # === Dependency lock file (optional, keep if you want reproducibility) ===
 Cargo.lock
-src/intersect/mod timing.rs
-src/utils/timing.rs
