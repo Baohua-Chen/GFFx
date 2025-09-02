@@ -9,6 +9,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+  
 env:
   CARGO_TERM_COLOR: always
   BIN_NAME: gffx
@@ -51,12 +55,7 @@ jobs:
             bin_ext: ".exe"
             archive: zip
             use_cross: false
-          # 留意：aarch64-pc-windows-msvc 可能缺依赖，若不确定先注释掉
-          # - os: windows-latest
-          #   target: aarch64-pc-windows-msvc
-          #   bin_ext: ".exe"
-          #   archive: zip
-          #   use_cross: false
+            
 
     steps:
       - uses: actions/checkout@v4
@@ -99,7 +98,7 @@ jobs:
             tar -czf "dist/${OUT_NAME}.tar.gz" -C dist "${OUT_NAME}${{ matrix.bin_ext }}"
             (sha256sum "dist/${OUT_NAME}.tar.gz" || shasum -a 256 "dist/${OUT_NAME}.tar.gz") > "dist/${OUT_NAME}.tar.gz.sha256"
           else
-            (cd dist && zip -r "${OUT_NAME}.zip" "${OUT_NAME}${{ matrix.bin_ext }}")
+            (cd dist && 7z a -tzip "${OUT_NAME}.zip" "${OUT_NAME}${{ matrix.bin_ext }}")
             (sha256sum "dist/${OUT_NAME}.zip" || shasum -a 256 "dist/${OUT_NAME}.zip") > "dist/${OUT_NAME}.zip.sha256"
           fi
 
@@ -113,6 +112,7 @@ jobs:
     name: Create GitHub Release
     needs: build
     runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
     steps:
       - uses: actions/download-artifact@v4
         with:
