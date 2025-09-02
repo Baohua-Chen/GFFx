@@ -66,8 +66,9 @@ jobs:
           targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@v2
+        with:
+        prefix-key: ${{ matrix.target }}
 
-      # 安装 cross：固定版本，避免用 git HEAD
       - name: Install cross
         if: matrix.use_cross == true
         uses: taiki-e/install-action@v2
