@@ -1,0 +1,133 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  BIN_NAME: gffx
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # --- Linux (musl / 静态) ---
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            bin_ext: ""
+            archive: tar.gz
+            use_cross: true
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+            bin_ext: ""
+            archive: tar.gz
+            use_cross: true
+
+          # --- macOS ---
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            bin_ext: ""
+            archive: tar.gz
+            use_cross: false
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            bin_ext: ""
+            archive: tar.gz
+            use_cross: false
+
+          # --- Windows (MSVC) ---
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bin_ext: ".exe"
+            archive: zip
+            use_cross: false
+          # 留意：aarch64-pc-windows-msvc 可能缺依赖，若不确定先注释掉
+          # - os: windows-latest
+          #   target: aarch64-pc-windows-msvc
+          #   bin_ext: ".exe"
+          #   archive: zip
+          #   use_cross: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain + target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      # 安装 cross：固定版本，避免用 git HEAD
+      - name: Install cross
+        if: matrix.use_cross == true
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross@0.2.5
+
+      - name: Build (release)
+        shell: bash
+        run: |
+          set -eux
+          if [ "${{ matrix.use_cross }}" = "true" ]; then
+            cross build --release --target ${{ matrix.target }}
+          else
+            cargo build --release --target ${{ matrix.target }}
+          fi
+
+      - name: Prepare artifact
+        shell: bash
+        run: |
+          set -eux
+          BIN_PATH="target/${{ matrix.target }}/release/${BIN_NAME}${{ matrix.bin_ext }}"
+          OUT_NAME="${BIN_NAME}-${{ matrix.target }}"
+
+          mkdir -p dist
+          cp "$BIN_PATH" "dist/${OUT_NAME}${{ matrix.bin_ext }}"
+
+          if [ "${{ matrix.archive }}" = "tar.gz" ]; then
+            tar -czf "dist/${OUT_NAME}.tar.gz" -C dist "${OUT_NAME}${{ matrix.bin_ext }}"
+            (sha256sum "dist/${OUT_NAME}.tar.gz" || shasum -a 256 "dist/${OUT_NAME}.tar.gz") > "dist/${OUT_NAME}.tar.gz.sha256"
+          else
+            (cd dist && zip -r "${OUT_NAME}.zip" "${OUT_NAME}${{ matrix.bin_ext }}")
+            (sha256sum "dist/${OUT_NAME}.zip" || shasum -a 256 "dist/${OUT_NAME}.zip") > "dist/${OUT_NAME}.zip.sha256"
+          fi
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: dist/*
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Gather files
+        run: |
+          set -eux
+          mkdir -p upload
+          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.sha256" \) -exec cp {} upload/ \;
+
+      - name: Publish Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: upload/*
+          generate_release_notes: true
+          draft: true
+          prerelease: true
