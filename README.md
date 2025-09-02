@@ -17,8 +17,9 @@ It can be used both as a **command-line tool** and as a **Rust library**.
 Starting from GFFx v0.3.1 and all later versions, the following breaking changes are in effect. These changes introduce important updates to default behavior, improve performance, and fix bugs.
    
 - **Default extraction/intersection mode changed**:  
-  Feature-Only Mode is now the default. To preserve the previous behavior (returning the entire gene model), users must explicitly pass the `-F` / `--full-model` flag.
-  Feature-Only Mode and Full-Model Mode have **comparable runtime performance**.
+  *Feature-Only* mode is now the default. To preserve the previous behavior (*Full-Model* mode, which returns the entire gene models), users must explicitly pass the `-F` / `--full-model` flag.
+  *Feature-Only* mode and *Full-Model* mode have **comparable runtime performance**.
+  `-T, --types` arguments can only be provided in the *Feature-Only* Mode
 
 - **To avoid short option conflicts in `extract`, renamed:**
   - `-f` (feature id) ->`-e`
