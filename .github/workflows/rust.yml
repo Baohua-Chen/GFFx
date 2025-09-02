@@ -67,7 +67,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-            prefix-key: ${{ matrix.target }}
+          prefix-key: ${{ matrix.target }}
 
       - name: Install cross
         if: matrix.use_cross == true
