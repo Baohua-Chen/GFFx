@@ -1,6 +1,6 @@
 [package]
 name = "gffx"
-version = "0.3.2"
+version = "0.4.0"
 edition = "2024"
 authors = ["Baohua Chen <cbh1117.163.com>"]
 description = "An ultra-fast and memory-efficient toolkit for querying GFF files, written with Rust"
@@ -29,4 +29,5 @@ meminterval = '0.4.1'
 serde_json = '1.0.140'
 serde = { version = '1.0.219', features = ["derive"] }
 bincode2 = '2.0.1'
+rust-htslib = '0.50'
 num_cpus = '1.17.0'

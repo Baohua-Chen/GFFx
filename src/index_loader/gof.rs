@@ -4,12 +4,16 @@ use rustc_hash::FxHashMap;
 use std::{path::Path, sync::OnceLock};
 use crate::{append_suffix, safe_mmap_readonly};
 
+const MISSING: u64 = u64::MAX; // Set sentinel value for missing entries
+
 #[derive(Debug)]
 pub struct GofEntry {
     pub feature_id: u32,
     pub start_offset: u64,
     pub end_offset: u64,
 }
+
+
 
 #[derive(Debug)]
 pub struct GofMap {
@@ -58,13 +62,18 @@ impl GofMap {
             use rayon::prelude::*;
             roots
                 .par_iter()
-                .filter_map(|&r| idx.get(&r).map(|&(s, e)| (r, s, e)))
+                .map(|&r| match idx.get(&r) {
+                    Some(&(s, e)) => (r, s, e),
+                    None => (r, MISSING, MISSING), // use u64::MAX as sentinel value
+                })
                 .collect()
         } else {
             let mut out = Vec::with_capacity(roots.len());
             for &r in roots {
                 if let Some(&(s, e)) = idx.get(&r) {
                     out.push((r, s, e));
+                } else {
+                    out.push((r, MISSING, MISSING)); // use u64::MAX as sentinel value
                 }
             }
             out

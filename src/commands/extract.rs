@@ -27,21 +27,25 @@ pub struct ExtractArgs {
     #[clap(flatten)]
     pub common: CommonArgs,
 
-    #[arg(short = 'e', long, group = "feature")]
+    #[arg(short = 'f', long, group = "feature")]
     pub feature_id: Option<String>,
 
-    #[arg(short = 'E', long, group = "feature")]
+    #[arg(short = 'F', long, group = "feature")]
     pub feature_file: Option<PathBuf>,
 }
 
 pub fn run(args: &ExtractArgs) -> Result<()> {
+    let gff_path = &args.common.input;
+
     // Start overall timer
     let overall_start = Instant::now();
-
-    let gff_path = &args.common.input;
     let verbose = args.common.verbose;
     if verbose {
         eprintln!("[DEBUG] Starting processing of {:?}", gff_path);
+        eprintln!(
+            "[DEBUG] Thread pool initialized with {} threads",
+            args.common.effective_threads()
+        );
     }
 
     // Load features
@@ -114,7 +118,7 @@ pub fn run(args: &ExtractArgs) -> Result<()> {
     // Phase B: roots -> block offsets
     let blocks: Vec<(u32, u64, u64)> = gof.roots_to_offsets(&roots, args.common.effective_threads());
 
-    if !args.common.full_model || args.common.types.is_some() {
+    if !args.common.entire_group || args.common.types.is_some() {
         // Build per_root_matches: root_id -> set of STRING feature IDs
         let mut per_root_matches: FxHashMap<u32, FxHashSet<String>> = FxHashMap::default();
         per_root_matches.reserve(roots.len());
@@ -141,7 +145,7 @@ pub fn run(args: &ExtractArgs) -> Result<()> {
             verbose,
         )?;
     } else {
-        // Full-model mode: emit full blocks without filtering
+        // Entire-group mode: emit entire blocks without filtering
         write_gff_output(
             gff_path,
             &blocks,
@@ -156,3 +160,4 @@ pub fn run(args: &ExtractArgs) -> Result<()> {
 
     Ok(())
 }
+

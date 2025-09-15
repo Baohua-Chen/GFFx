@@ -7,7 +7,8 @@ use indexmap::IndexMap;
 use memchr::memchr;
 use memmap2::Mmap;
 use regex::{Regex, escape};
-use std::{collections::HashMap, fs::File, io::Write, path::PathBuf};
+use std::{fs::File, io::Write, path::PathBuf};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 // Writes text lines to a file
 pub fn write_lines(path: PathBuf, lines: &[String]) -> Result<()> {
@@ -37,11 +38,13 @@ pub fn write_gof(file: &mut File, id: u32, start: u64, end: u64) -> Result<()> {
 }
 
 /// Builds various index files for a GFF: .fts, .prt, .a2f, .atn, .sqs, .gof, .rit, .rix
-pub fn build_index(gff: &PathBuf, attr_key: &str, verbose: bool) -> Result<()> {
+pub fn build_index(gff: &PathBuf, attr_key: &str, skip_types: &str, verbose: bool) -> Result<()> {
     // Compile regex patterns
     let id_re = Regex::new(r"ID=([^;\s]+)")?;
     let parent_re = Regex::new(r"Parent=([^;\s]+)")?;
     let attr_re = Regex::new(&format!(r"{}=([^;]+)", escape(attr_key)))?;
+
+    let skip_types_set: FxHashSet<&str> = skip_types.split(',').collect();
 
     if verbose {
         eprintln!("Building index for {} ...", gff.display());
@@ -87,9 +90,24 @@ pub fn build_index(gff: &PathBuf, attr_key: &str, verbose: bool) -> Result<()> {
         }
 
         let seqid = fields[0].to_string();
-        let start = fields[3].parse::<u32>()?;
-        let end = fields[4].parse::<u32>()?;
+        let ftype = fields[2];
 
+        if skip_types_set.contains(ftype) {
+            if verbose {
+                    println!("skip comment feature: {}", ftype);
+            }
+            continue;
+        }
+
+        let s1 = fields[3].parse::<u32>()?;
+        let e1 = fields[4].parse::<u32>()?;
+        if e1 == 0 {
+            continue;
+        }
+        let (s1, e1) = if s1 > e1 { (e1, s1) } else { (s1, e1) };
+        let start = s1.saturating_sub(1);
+        let end   = e1;
+        
         // Extract ID
         let id = id_re
             .captures(line)
@@ -120,7 +138,7 @@ pub fn build_index(gff: &PathBuf, attr_key: &str, verbose: bool) -> Result<()> {
     }
 
     // Build feature_map: string ID -> numeric ID
-    let mut feature_map: HashMap<String, u32> = HashMap::new();
+    let mut feature_map: FxHashMap<String, u32> = FxHashMap::default();
     for (i, rf) in raw_features.iter().enumerate() {
         feature_map.insert(rf.id.clone(), i as u32);
     }
@@ -130,7 +148,7 @@ pub fn build_index(gff: &PathBuf, attr_key: &str, verbose: bool) -> Result<()> {
     let mut prt_entries = Vec::with_capacity(raw_features.len());
     let mut a2f_entries = Vec::with_capacity(raw_features.len());
     let mut atn_entries = Vec::new();
-    let mut attr_value_to_id: HashMap<String, u32> = HashMap::new();
+    let mut attr_value_to_id: FxHashMap<String, u32> = FxHashMap::default();
     let mut gof_file = File::create(append_suffix(gff, ".gof"))?;
     let mut seqid_intervals: IndexMap<String, Vec<(u32, u32, u32)>> = IndexMap::new();
     let mut current_root: Option<(u32, u64)> = None;
@@ -194,8 +212,8 @@ pub fn build_index(gff: &PathBuf, attr_key: &str, verbose: bool) -> Result<()> {
     // Write .rit and .rix
     let rit = append_suffix(gff, ".rit");
     let rix = append_suffix(gff, ".rix");
-    let offsets = save_multiple_trees(rit.to_str().unwrap(), &trees)?;
-    write_offsets_to_file(&offsets, rix.to_str().unwrap())?;
+    let offsets = save_multiple_trees(&trees, rit.as_path())?;
+    write_offsets_to_file(&offsets, rix.as_path())?;
 
     // Write .sqs (sequence list)
     let seqids: Vec<String> = seqid_to_num.keys().cloned().collect();

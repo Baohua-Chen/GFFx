@@ -1,10 +1,8 @@
-use anyhow::{Context, Result, bail};
-use bincode2::deserialize;
+use anyhow::{Context, Result};
 use clap::{ArgGroup, Parser};
 use lexical_core::parse;
 use memchr::memchr;
 use memmap2::Mmap;
-use memmap2::MmapOptions;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::{
@@ -14,8 +12,10 @@ use std::{
 };
 
 use crate::{
-    CommonArgs, Interval, IntervalTree, append_suffix, load_gof, load_sqs, write_gff_output,
+    CommonArgs, Interval, TreeIndexData, load_gof, write_gff_output,
 };
+
+const MISSING: u64 = u64::MAX; // Set sentinel value for missing entries
 
 /// Number of IoSlices per batch writer
 const IOV_BATCH: usize = 256;
@@ -69,95 +69,9 @@ pub struct IntersectArgs {
     pub invert: bool,
 }
 
-/// Index data structure using interval trees
-#[derive(Debug)]
-pub struct IndexData {
-    pub chr_entries: FxHashMap<u32, IntervalTree<u32>>,
-    pub seqid_to_num: FxHashMap<String, u32>,
-    pub common: CommonArgs,
-}
-
-impl IndexData {
-    pub fn load(index_prefix: &Path, common: &CommonArgs) -> Result<Self> {
-        let (seqids, _) = load_sqs(index_prefix)?;
-        let seqid_to_num = seqids
-            .into_iter()
-            .enumerate()
-            .map(|(i, sq)| (sq, i as u32))
-            .collect();
-
-        let rit_path = append_suffix(index_prefix, ".rit");
-        let rix_path = append_suffix(index_prefix, ".rix");
-        let chr_entries = Self::load_region_index(&rit_path, &rix_path)?;
-
-        Ok(Self {
-            chr_entries,
-            seqid_to_num,
-            common: common.clone(),
-        })
-    }
-
-    fn load_region_index(
-        rit_path: &Path,
-        rix_path: &Path,
-    ) -> Result<FxHashMap<u32, IntervalTree<u32>>> {
-        // mmap .rit
-        let file = File::open(rit_path).with_context(|| format!("open {}", rit_path.display()))?;
-        let mmap = unsafe { MmapOptions::new().map(&file) }
-            .with_context(|| format!("mmap {}", rit_path.display()))?;
-        let buf: &[u8] = &mmap;
-
-        // 读 offsets
-        let offsets: Vec<u64> = {
-            let f = File::open(rix_path).with_context(|| format!("open {}", rix_path.display()))?;
-            serde_json::from_reader::<_, Vec<u64>>(f)
-                .with_context(|| format!("parse json {}", rix_path.display()))?
-        };
-        if offsets.is_empty() {
-            return Ok(FxHashMap::default());
-        }
-
-        // Validation
-        for w in offsets.windows(2) {
-            if w[0] > w[1] {
-                bail!("offsets not sorted ascending: {:?} > {:?}", w[0], w[1]);
-            }
-        }
-        let last = *offsets.last().unwrap() as usize;
-        if last > buf.len() {
-            bail!("last offset {} out of file size {}", last, buf.len());
-        }
-
-        // Slice and deserialize
-        let mut map = FxHashMap::with_capacity_and_hasher(offsets.len(), Default::default());
-        for (i, start_u64) in offsets.iter().copied().enumerate() {
-            let start = start_u64 as usize;
-            let end = if i + 1 < offsets.len() {
-                offsets[i + 1] as usize
-            } else {
-                buf.len()
-            };
-            if end < start || end > buf.len() {
-                bail!(
-                    "bad slice range: {}..{} (file len {})",
-                    start,
-                    end,
-                    buf.len()
-                );
-            }
-            let slice = &buf[start..end];
-            let tree: IntervalTree<u32> = deserialize(slice).with_context(|| {
-                format!("bincode2 deserialize tree #{} ({}..{})", i, start, end)
-            })?;
-            map.insert(i as u32, tree);
-        }
-        Ok(map)
-    }
-}
-
 /// Overlap detection modes
 #[derive(Debug, Clone, Copy)]
-enum OverlapMode {
+pub enum OverlapMode {
     Contained,
     ContainsRegion,
     Overlap,
@@ -189,39 +103,20 @@ pub fn gff_type_allowed(line: &[u8], allow: &FxHashSet<String>) -> bool {
 
 /// Core feature query logic using interval trees
 pub fn query_features(
-    index_data: &IndexData,
-    regions: Vec<(u32, u32, u32)>,
-    contained: bool,
-    contains_region: bool,
+    index_data: &TreeIndexData,
+    regions: &[(u32, u32, u32)],
+    mode: OverlapMode,
     invert: bool,
+    verbose: bool,
 ) -> Result<Vec<(u32, u32, u32)>> {
-    let verbose = index_data.common.verbose;
 
-    if verbose {
-        eprintln!(
-            "[DEBUG] Starting query_features with {} regions",
-            regions.len()
-        );
-        eprintln!(
-            "[DEBUG] Mode: contained={}, contains_region={}, invert={}",
-            contained, contains_region, invert
-        );
-    }
-
+    // Bucket regions by chromosome
     let buckets: Vec<Vec<(u32, u32, u32)>> = {
         let mut b = vec![Vec::new(); index_data.seqid_to_num.len()];
-        for (chr, start, end) in regions {
+        for (chr, start, end) in regions.iter().copied() {
             b[chr as usize].push((chr, start, end));
         }
         b
-    };
-
-    let _mode = if contained {
-        OverlapMode::Contained
-    } else if contains_region {
-        OverlapMode::ContainsRegion
-    } else {
-        OverlapMode::Overlap
     };
 
     let mut results = Vec::new();
@@ -238,13 +133,38 @@ pub fn query_features(
                     chr_regs.len()
                 );
             }
+    
+            let mut hits: Vec<&Interval<u32>> = Vec::new();
+    
             for &(_, rstart, rend) in chr_regs {
-                let hits: Vec<&Interval<u32>> = tree.query_interval(rstart, rend);
-                results.extend(hits.into_iter().map(|iv| (iv.root_fid, iv.start, iv.end)));
+                hits.clear();
+                tree.query_interval(rstart, rend, &mut hits);
+    
+                for &iv in &hits {
+                    // Decide whether to keep this feature based on mode
+                    let keep = match mode {
+                        OverlapMode::Contained => {
+                            // Feature must be fully contained in region
+                            iv.start >= rstart && iv.end <= rend
+                        }
+                        OverlapMode::ContainsRegion => {
+                            // Feature must fully contain region
+                            iv.start <= rstart && iv.end >= rend
+                        }
+                        OverlapMode::Overlap => {
+                            // Any overlap is acceptable
+                            true
+                        }
+                    };
+    
+                    // Apply invert flag (XOR logic)
+                    if invert ^ keep {
+                        results.push((iv.root_fid, iv.start, iv.end));
+                    }
+                }
             }
         }
-    }
-
+    }  
     Ok(results)
 }
 
@@ -309,13 +229,13 @@ pub fn parse_bed_file(
     Ok(regions)
 }
 
-/// Filter and output by coordinates
 pub fn write_gff_match_only_by_coords(
     gff_path: &Path,
     blocks: &[(u32, u64, u64)], //Per-block parallel scan to collect (line_start, line_end) offsets
     query_ivmap: &FxHashMap<String, Vec<(u32, u32)>>,
     types_filter: Option<&str>,
     output_path: &Option<PathBuf>,
+    mode: OverlapMode,
     verbose: bool,
 ) -> Result<()> {
     // mmap the whole GFF once
@@ -345,7 +265,11 @@ pub fn write_gff_match_only_by_coords(
 
         let parts: Vec<(u64, Vec<(u64, u64)>)> = blocks
             .par_iter()
-            .filter_map(|&(_root, start, end)| {
+            .filter_map(|&(root, start, end)| {
+                if start == MISSING {
+                    eprintln!("[WARN] skipped fid={} due to sentinel start offset", root);
+                    return None;
+                }
                 let s = start as usize;
                 let e = (end as usize).min(file_len);
                 if s >= e || e > file_len {
@@ -380,7 +304,7 @@ pub fn write_gff_match_only_by_coords(
                         {
                             pass = false;
                         }
-                        if pass && gff_line_overlaps_queries(line_nocr, query_ivmap) {
+                        if pass && gff_line_overlaps_queries(line_nocr, query_ivmap, mode) {
                             // Record absolute offsets in the file (including '\n')
                             let abs_start = start + pos as u64;
                             let abs_end = start + nl as u64;
@@ -513,9 +437,13 @@ pub fn write_gff_match_only_by_coords(
     Ok(())
 }
 
-/// Parse the 3rd column (type) of GFF and check against the set
-pub fn gff_line_overlaps_queries(line: &[u8], ivmap: &FxHashMap<String, Vec<(u32, u32)>>) -> bool {
-    // Parse first 5 columns quickly: seq, source, type, start, end
+/// Parse GFF line and check if it overlaps with query intervals
+pub fn gff_line_overlaps_queries(
+    line: &[u8],
+    ivmap: &FxHashMap<String, Vec<(u32, u32)>>,
+    mode: OverlapMode,
+) -> bool {
+    // Parse columns: seq, source, type, start, end
     let mut off = 0usize;
 
     let i1 = match memchr(b'\t', &line[off..]) {
@@ -525,18 +453,21 @@ pub fn gff_line_overlaps_queries(line: &[u8], ivmap: &FxHashMap<String, Vec<(u32
     let seq = &line[off..i1];
     off = i1 + 1;
 
+    // skip source
     let i2 = match memchr(b'\t', &line[off..]) {
         Some(i) => off + i,
         None => return false,
     };
     off = i2 + 1;
 
+    // skip type
     let i3 = match memchr(b'\t', &line[off..]) {
         Some(i) => off + i,
         None => return false,
     };
     off = i3 + 1;
 
+    // parse start
     let i4 = match memchr(b'\t', &line[off..]) {
         Some(i) => off + i,
         None => return false,
@@ -547,6 +478,7 @@ pub fn gff_line_overlaps_queries(line: &[u8], ivmap: &FxHashMap<String, Vec<(u32
     };
     off = i4 + 1;
 
+    // parse end
     let i5 = match memchr(b'\t', &line[off..]) {
         Some(i) => off + i,
         None => return false,
@@ -566,12 +498,24 @@ pub fn gff_line_overlaps_queries(line: &[u8], ivmap: &FxHashMap<String, Vec<(u32
     };
 
     for &(qs, qe) in ivs {
-        // Use simple integer comparisons to check overlap
-        if (qs <= start && start <= qe)
-            || (qs <= end && end <= qe)
-            || (start <= qs && qs <= end)
-            || (start <= qe && qe <= end)
-        {
+        let keep = match mode {
+            OverlapMode::Contained => {
+                // feature must be fully inside query
+                start >= qs && end <= qe
+            }
+            OverlapMode::ContainsRegion => {
+                // feature must fully contain query
+                start <= qs && end >= qe
+            }
+            OverlapMode::Overlap => {
+                // any overlap
+                (qs <= start && start <= qe)
+                    || (qs <= end && end <= qe)
+                    || (start <= qs && qs <= end)
+                    || (start <= qe && qe <= end)
+            }
+        };
+        if keep {
             return true;
         }
     }
@@ -596,36 +540,56 @@ fn parse_u32_ascii(s: &[u8]) -> Option<u32> {
 /// Main execution function
 pub fn run(args: &IntersectArgs) -> Result<()> {
     let verbose = args.common.verbose;
-    // Build thread pool
-    args.common.init_rayon();
+    
     if verbose {
+        eprintln!("[DEBUG] Starting processing of {:?}", args.common.input);
         eprintln!(
             "[DEBUG] Thread pool initialized with {} threads",
             args.common.effective_threads()
         );
     }
+    
+    // Determine overlap mode
+    let mode = if args.contained {
+        OverlapMode::Contained
+    } else if args.contains_region {
+        OverlapMode::ContainsRegion
+    } else {
+        OverlapMode::Overlap
+    };
 
-    let (_, seqid_map) = { load_sqs(&args.common.input)? };
+    let index_data = TreeIndexData::load_tree_index(&args.common.input)?;
+    let seqid_map = &index_data.seqid_to_num;
 
     let regions = {
         if let Some(bed) = &args.bed {
-            parse_bed_file(bed, &seqid_map)?
+            parse_bed_file(bed, seqid_map)?
         } else if let Some(r) = &args.region {
-            vec![parse_region(r, &seqid_map, &args.common)?]
+            vec![parse_region(r, seqid_map, &args.common)?]
         } else {
             anyhow::bail!("No region specified");
         }
     };
 
-    let index_data = { IndexData::load(&args.common.input, &args.common)? };
 
+    if verbose {
+        eprintln!(
+            "[DEBUG] Starting query_features with {} regions",
+            regions.len()
+        );
+        eprintln!(
+            "[DEBUG] Mode: {:?}",
+            mode
+        );
+    }
+    
     let feats = {
         query_features(
             &index_data,
-            regions.clone(),
-            args.contained,
-            args.contains_region,
+            &regions,
+            mode,
             args.invert,
+            args.common.verbose,
         )?
     };
 
@@ -633,7 +597,7 @@ pub fn run(args: &IntersectArgs) -> Result<()> {
     let gof = load_gof(&args.common.input)?;
     let root_matches: Vec<RootMatched> = {
         let mut grouped: FxHashMap<u32, Vec<u32>> = FxHashMap::default();
-        for &(root, _s, _e) in &feats {
+        for (root, _s, _e) in feats {
             grouped.entry(root).or_default().push(root);
         }
         grouped
@@ -652,7 +616,7 @@ pub fn run(args: &IntersectArgs) -> Result<()> {
 
     let blocks: Vec<(u32, u64, u64)> = gof.roots_to_offsets(&roots, args.common.effective_threads());
 
-    if !args.common.full_model || args.common.types.is_some() {
+    if !args.common.entire_group || args.common.types.is_some() {
         // Build query interval map by seq name
         let query_ivmap: FxHashMap<String, Vec<(u32, u32)>> = {
             let mut num_to_seq: FxHashMap<u32, String> = FxHashMap::default();
@@ -675,6 +639,7 @@ pub fn run(args: &IntersectArgs) -> Result<()> {
                 &query_ivmap,
                 args.common.types.as_deref(),
                 &args.common.output,
+                mode,
                 args.common.verbose,
             )?;
         }

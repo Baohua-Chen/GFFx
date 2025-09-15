@@ -17,7 +17,7 @@ use crate::{
 
 #[derive(Parser, Debug)]
 #[command(
-    about = "Search features by attribute values and extract their full models.",
+    about = "Search features by attribute values",
     group = ArgGroup::new("attr_input")
         .required(true)
         .args(["attr_list", "attr"])
@@ -50,14 +50,13 @@ pub struct SearchArgs {
     regex: bool,
 }
 
-/// When `--full-model` is OFF: within each root block, emit only lines whose `ID` exactly matches
+/// When in `per-feature` mode: within each root block, emit only lines whose `ID` exactly matches
 /// the user-specified features under that root. Optional `types_filter` is applied to column 3.
 pub fn run(args: &SearchArgs) -> Result<()> {
     let verbose = args.common.verbose;
     let gff_path = &args.common.input;
 
     // Init thread pool
-    args.common.init_rayon();
     let overall_start = Instant::now();
     if verbose {
         eprintln!("[DEBUG] Starting processing of {:?}", gff_path);
@@ -196,7 +195,7 @@ pub fn run(args: &SearchArgs) -> Result<()> {
 
     let blocks: Vec<(u32, u64, u64)> = gof.roots_to_offsets(&roots_effective, args.common.effective_threads());
     
-    if !args.common.full_model || args.common.types.is_some() {
+    if !args.common.entire_group|| args.common.types.is_some() {
         let allowed_roots: FxHashSet<u32> = roots_effective.iter().copied().collect();
         
         let mut fid_to_root: FxHashMap<u32, u32> = FxHashMap::default();

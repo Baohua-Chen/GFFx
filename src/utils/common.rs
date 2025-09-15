@@ -1,4 +1,3 @@
-use crate::index_builder::core::build_index;
 use anyhow::{Result, Context};
 use clap::{Parser, CommandFactory};
 use clap::error::ErrorKind;
@@ -13,6 +12,8 @@ use std::{
     str,
 };
 
+const MISSING: u64 = u64::MAX; // Set sentinel value for missing entries
+
 #[derive(Debug, Clone, Parser)]
 pub struct CommonArgs {
     /// Input GFF file path
@@ -23,9 +24,9 @@ pub struct CommonArgs {
     #[arg(short = 'o', long = "output", value_name = "FILE")]
     pub output: Option<PathBuf>,
 
-    /// Return the entire gene model for each match (full-model mode); default: only the matched feature (feature-only mode).
-    #[arg(short = 'F', long = "full-model", default_value_t = false)]
-    pub full_model: bool,
+    /// Return the entire feature group for each match (entire-group mode); default: only the matched feature (per-feature mode).
+    #[arg(short = 'F', long = "entire_group", default_value_t = false)]
+    pub entire_group: bool,
 
     /// Comma-separated feature types to retain (e.g. exon,gene); only effective in feature-only mode
     #[arg(short = 'T', long = "types", value_name = "TYPES")]
@@ -89,8 +90,8 @@ impl CommonArgs {
     /// - Print info messages
     /// - Initialize rayon
     pub fn post_parse(&self) -> Result<(), clap::Error> {
-        // Custom conflict error: full-model mode cannot be combined with --types
-        if self.full_model && self.types.is_some() {
+        // Custom conflict error: entire-group mode cannot be combined with --types
+        if self.entire_group && self.types.is_some() {
             return Err(
                 clap::Error::raw(
                     ErrorKind::ArgumentConflict,
@@ -146,14 +147,8 @@ pub fn write_gff_header<W: Write>(writer: &mut W, gff_buf: &[u8]) -> Result<usiz
 /// Expected suffixes: `.gof`, `.fts`, `.prt`, `.sqs`, `.atn`, `.a2f`, `.rit`, `.rix`.
 ///
 /// If any are missing:
-/// - If `rebuild = true`, rebuild the index in place and return `Ok(true)`.
 /// - Otherwise, return `Ok(false)`.
-pub fn check_index_files_exist(
-    gff: &PathBuf,
-    rebuild: bool,
-    attr_key: &str,
-    verbose: bool,
-) -> Result<bool> {
+pub fn check_index_files_exist(gff: &PathBuf) -> Result<bool> {
     let expected_suffixes = [
         ".gof", ".fts", ".prt", ".sqs", ".atn", ".a2f", ".rit", ".rix",
     ];
@@ -167,13 +162,11 @@ pub fn check_index_files_exist(
     }
 
     if !missing.is_empty() {
-        if rebuild {
-            build_index(gff, attr_key, verbose)?;
-            return Ok(true);
-        }
-        return Ok(false);
+        eprintln!("Missing index file(s): {:?}", missing);
+        Ok(false)
+    } else {
+        Ok(true)
     }
-    Ok(true)
 }
 
 /// Write selected byte ranges ("blocks") of a GFF file to an output file or stdout.
@@ -203,7 +196,17 @@ pub fn write_gff_output(
     let file_len = mmap.len();
 
     // sort and merge blocks
-    let mut sorted: Vec<(u64, u64)> = blocks.iter().map(|&(_, s, e)| (s, e)).collect();
+    let mut sorted: Vec<(u64, u64)> = {
+        let mut v = Vec::with_capacity(blocks.len());
+        for &(fid, s, e) in blocks {
+            if s == MISSING {
+                eprintln!("[WARN] skipped fid={} due to sentinel start offset", fid);
+                continue;
+            }
+            v.push((s, e));
+        }
+        v
+    };
     sorted.sort_unstable_by_key(|&(s, _)| s);
 
     let mut merged: Vec<(u64, u64)> = Vec::with_capacity(sorted.len());
@@ -282,7 +285,6 @@ pub fn write_gff_output(
     }
     Ok(())
 }
-
 
 pub fn write_gff_output_filtered(
     gff_path: &PathBuf,
