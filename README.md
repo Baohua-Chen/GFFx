@@ -14,22 +14,17 @@ It can be used both as a **command-line tool** and as a **Rust library**.
 
 ## Breaking Changes
 
-Starting from GFFx v0.3.1 and all later versions, the following breaking changes are in effect. These changes introduce important updates to default behavior, improve performance, and fix bugs.
-   
-- **Default extraction/intersection mode changed**:  
-  *Feature-Only* mode is now the default. To preserve the previous behavior (*Full-Model* mode, which returns the entire gene models), users must explicitly pass the `-F` / `--full-model` flag.
-- *Feature-Only* mode and *Full-Model* mode have **comparable runtime performance**.
-- `-T, --types` arguments can only be provided in the *Feature-Only* Mode
+Added two useful functionalities: `coverage` for calculating breadth of coverage and `depth` for calculating depth of coverage from BAM/SAM/CRAM or BED files on a GFF file.
 
-- **To avoid short option conflicts in `extract`, renamed:**
-  - `-f` (feature id) ->`-e`
-  - `-F` (feature file) -> `-E`
+Added a `sample` functionality for random downsampling of feature groups from each chromosome at equal ratios.
+
+Updated module organization and source code directory layout to conform to the Rust 2024 edition guidelines for module visibility (`pub`) and path imports.
 
 ---
 
 ## Table of Contents
 
-*GFFx version 0.3.2*
+*GFFx version 0.4.0*
 
 ---
 
@@ -39,6 +34,11 @@ Starting from GFFx v0.3.1 and all later versions, the following breaking changes
   - [extract](#extract) - Extract features by ID
   - [intersect](#intersect) - Extract features by regions
   - [search](#search) - Search features by attributes
+  - [coverage](#coverage) - Calculate coverage breadth
+  - [depth](#depth) - Calculate coverage depth
+  - [sample](#sample) - Randomly downsample feature groups
+
+
 - [Example Use Cases](#example-use-cases)
 - [Using GFFx as a Rust Library](#using-gffx-as-a-rust-library)
 - [Available Public APIs](#available-public-apis)
@@ -127,7 +127,7 @@ Optional
 | Option                      | Description                                                                    |
 | -------------------------   | ------------------------------------------------------------------------------ |
 | `-o`, `--output` `<OUT>`    | Output file path (default: stdout)                                             |
-| `-F`, `--full-model`        | Enable the "full-model" mode, which whill return the non-redundant gene models |
+| `-e`, `--entire-group`      | Enable the "entire-group" mode. Return entire gene models or feature groups    |
 |                             | for all matched features, instead of only the directly matched features.       |
 | `-v`, `--invert`            | Invert selection (exclude matched features)                                    |
 | `-T`, `--types` `<TYPES>`   | Filter output to include only features of specified types (e.g., `gene,exon`)  |
@@ -156,14 +156,14 @@ Required
 | ---------------------------------------- | ------------------------------------------------------------ |
 | `-i`, `--input` `<INPUT>`                | Input GFF file path                                          |
 | *(one of)*                               |                                                              |
-| `-e`, `--feature-id` `<FEATURE_ID>`      | Extrach by a single feature id                               |
-| `-E`, `--feature-file` `<FEATURE_FILE>`  | Extrach by a BED file containing multiple regions            |
+| `-f`, `--feature-id` `<FEATURE_ID>`      | Extrach by a single feature id                               |
+| `-e`, `--feature-file` `<FEATURE_FILE>`  | Extrach by a BED file containing multiple regions            |
 
 Optional
 | Option                      | Description                                                                    |
 | -------------------------   | ------------------------------------------------------------------------------ |
 | `-o`, `--output` `<OUT>`    | Output file path (default: stdout)                                             |
-| `-F`, `--full-model`        | Enable the "full-model" mode, which whill return the non-redundant gene models |
+| `-e`, `--entire-group`      | Enable the "entire-group" mode. Return entire gene models or feature groups    |
 |                             | for all matched features, instead of only the directly matched features.       |
 | `-T`, `--types` `<TYPES>`   | Filter output to include only features of specified types (e.g., `gene,exon`)  |
 | `-t`, `--threads` `<NUM>`   | Number of threads [default: 12]                                                |
@@ -187,17 +187,101 @@ Required
 | ---------------------------------------- | ------------------------------------------------------------ |
 | `-i`, `--input` `<INPUT>`                | Input GFF file path                                          |
 | *(one of)*                               |                                                              |
-| `-a`, `--attr` `ATTRIBUTE_VALUE>`        | Search a single attribute value/pattern                      |
+| `-a`, `--attr` `<ATTRIBUTE_VALUE>`        | Search a single attribute value/pattern                      |
 | `-A`, `--attr-list` `<ATTRIBUTE_LIST>`   | Search attribute values/patterns defined in a text file      |
 
 Optional
 | Option                      | Description                                                                    |
 | -------------------------   | ------------------------------------------------------------------------------ |
 | `-o`, `--output` `<OUT>`    | Output file path (default: stdout)                                             |
-| `-F`, `--full-model`        | Enable the "full-model" mode, which whill return the non-redundant gene models |
+| `-e`, `--entire-group`      | Enable the "entire-group" mode. Return entire gene models or feature groups    |
 |                             | for all matched features, instead of only the directly matched features.       |
 | `-r`, `--regex` `<REGEX>`   | Enable regex matching for attribute values                                     |
 | `-T`, `--types` `<TYPES>`   | Filter output to include only features of specified types (e.g., `gene,exon`)  |
+| `-t`, `--threads` `<NUM>`   | Number of threads [default: 12]                                                |
+| `-V`, `--verbose`           | Enable verbose output                                                          |
+| `-h`, `--help`              | Show help message                                                              |
+
+---
+
+### `coverage`
+
+Compute coverage breadth across genomic feature.
+
+```bash
+gffx coverage -i input.gff -s source.bam
+```
+
+**Options:**
+
+Required
+| Option                                   | Description                                                  |
+| ---------------------------------------- | ------------------------------------------------------------ |
+| `-i`, `--input` `<INPUT>`                | Input GFF file path                                          |
+| `-s`, `--source` `<SOURCE>`              | Source file in BAM/SAM/CRAM or BED format                    |
+
+Optional
+| Option                      | Description                                                                    |
+| -------------------------   | ------------------------------------------------------------------------------ |
+| `-o`, `--output` `<OUT>`    | Output file path (default: stdout)                                             |
+| `-e`, `--entire-group`      | Enable the "entire-group" mode. Return entire gene models or feature groups    |
+|                             | for all matched features, instead of only the directly matched features.       |
+| `-t`, `--threads` `<NUM>`   | Number of threads [default: 12]                                                |
+| `-V`, `--verbose`           | Enable verbose output                                                          |
+| `-h`, `--help`              | Show help message                                                              |
+
+---
+
+### `depth`
+
+Compute coverage depth across genomic feature.
+
+```bash
+gffx depth -i input.gff -s source.bam
+```
+
+**Options:**
+
+Required
+| Option                                   | Description                                                  |
+| ---------------------------------------- | ------------------------------------------------------------ |
+| `-i`, `--input` `<INPUT>`                | Input GFF file path                                          |
+| `-s`, `--source` `<SOURCE>`              | Source file in BAM/SAM/CRAM or BED format                    |
+
+Optional
+| Option                      | Description                                                                    |
+| -------------------------   | ------------------------------------------------------------------------------ |
+| `-o`, `--output` `<OUT>`    | Output file path (default: stdout)                                             |
+| `--bin-shift` `<BIN_SHIFT>` | Bin width parameter (2^k bp) for spatial bucketing of features and queries.    |
+|                             | Choose k so that a typical read and feature span ~1–2 bins [default: 12]       |
+| `-e`, `--entire-group`      | Enable the "entire-group" mode. Return entire gene models or feature groups    |
+|                             | for all matched features, instead of only the directly matched features.       |
+| `-t`, `--threads` `<NUM>`   | Number of threads [default: 12]                                                |
+| `-V`, `--verbose`           | Enable verbose output                                                          |
+| `-h`, `--help`              | Show help message                                                              |
+
+---
+
+### `sample`
+
+Ramdomly downsample feature groups.
+
+```bash
+gffx sample -i input.gff -r 0.33
+```
+
+**Options:**
+
+Required
+| Option                                   | Description                                                  |
+| ---------------------------------------- | ------------------------------------------------------------ |
+| `-i`, `--input` `<INPUT>`                | Input GFF file path                                          |
+| `-r`, `--ratio` `<RATIO>`                | Ratio of downsampling, should be between 0 and 1             |
+
+Optional
+| Option                      | Description                                                                    |
+| -------------------------   | ------------------------------------------------------------------------------ |
+| `-o`, `--output` `<OUT>`    | Output file path (default: stdout)                                             |
 | `-t`, `--threads` `<NUM>`   | Number of threads [default: 12]                                                |
 | `-V`, `--verbose`           | Enable verbose output                                                          |
 | `-h`, `--help`              | Show help message                                                              |
@@ -218,6 +302,7 @@ gffx extract --feature-file genes.txt -i genes.gff -o subset.gff -F
 
 # Search by gene name and extract the full model
 gffx search -a TP53 -i genes.gff -o tp53_model.gff
+
 ```
 
 ---

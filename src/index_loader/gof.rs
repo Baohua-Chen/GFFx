@@ -9,6 +9,7 @@ const MISSING: u64 = u64::MAX; // Set sentinel value for missing entries
 #[derive(Debug)]
 pub struct GofEntry {
     pub feature_id: u32,
+    pub seqid_num: u32, 
     pub start_offset: u64,
     pub end_offset: u64,
 }
@@ -21,6 +22,8 @@ pub struct GofMap {
     pub entries: Vec<GofEntry>,
     /// Lazy, thread-safe cache: feature_id -> (start, end)
     index_cache: OnceLock<FxHashMap<u32, (u64, u64)>>,
+    pub seqid_index: FxHashMap<u32, Vec<usize>>,       // seqid_num -> entry indices
+
 }
 
 impl GofMap {
@@ -79,6 +82,13 @@ impl GofMap {
             out
         }
     }
+    
+    pub fn roots_for_seqid(&self, seqid_num: u32) -> Vec<&GofEntry> {
+        match self.seqid_index.get(&seqid_num) {
+            Some(indices) => indices.iter().map(|&i| &self.entries[i]).collect(),
+            None => Vec::new(),
+        }
+    }
 }
 
 /// Load a `.gof` file containing (u32 fid, u32 padding, u64 start, u64 end) records.
@@ -100,16 +110,19 @@ pub fn load_gof<P: AsRef<Path>>(gff_path: P) -> Result<GofMap> {
     }
 
     let mut entries = Vec::with_capacity(bytes.len() / REC_SIZE);
-    for rec in bytes.chunks_exact(REC_SIZE) {
+    let mut seqid_index: FxHashMap<u32, Vec<usize>> = FxHashMap::default();
+    for (i, rec) in bytes.chunks_exact(REC_SIZE).enumerate() {
         let fid   = LittleEndian::read_u32(&rec[0..4]);
-        // let _pad = LittleEndian::read_u32(&rec[4..8]);
+        let seqid_num = LittleEndian::read_u32(&rec[4..8]);
         let start = LittleEndian::read_u64(&rec[8..16]);
         let end   = LittleEndian::read_u64(&rec[16..24]);
-        entries.push(GofEntry { feature_id: fid, start_offset: start, end_offset: end });
+        entries.push(GofEntry { feature_id: fid, seqid_num: seqid_num, start_offset: start, end_offset: end });
+        seqid_index.entry(seqid_num).or_default().push(i);
     }
 
     Ok(GofMap {
         entries,
         index_cache: OnceLock::new(),
+        seqid_index,
     })
 }

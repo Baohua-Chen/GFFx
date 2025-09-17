@@ -31,7 +31,7 @@ fn _bin_of(x: u32, shift: u32) -> u32 {
 /// Arguments
 #[derive(Parser, Debug)]
 #[command(
-    about = "Compute coverage fraction across genomic features or in gene-centric mode",
+    about = "Compute coverage breadth across genomic feature.",
     long_about = "This tool computes sequencing coverage breadth and fraction from high-throughput sequencing (HTS) alignment files (SAM/BAM/CRAM) or user-specified genomic intervals (BED)."
 )]
 pub struct CoverageArgs {
@@ -47,14 +47,6 @@ pub struct CoverageArgs {
     #[arg(short = 'o', long = "output", value_name = "FILE")]
     pub output: Option<PathBuf>,
 
-//    /// Retained feature types (unused in this simplified breadth-only pipeline)
-//    #[arg(short = 'T', long = "types", value_name = "TYPES")]
-//    pub types: Option<String>,
-
-    /// Bin width parameter (kept for CLI compatibility; unused here)
-    #[arg(long = "bin-shift", default_value_t = 12)]
-    pub bin_shift: u32,
-    
     /// Number of threads
     #[arg(short = 't', long = "threads", default_value_t = 12, value_name = "NUM")]
     pub threads: usize,
@@ -500,7 +492,6 @@ pub fn write_breadth_results<W: Write>(
 /// Main
 pub fn run(args: &CoverageArgs) -> Result<()> {
     let verbose = args.verbose;
-    let _bin_shift = args.bin_shift; // kept for CLI compatibility; unused
     let threads = if args.threads == 0 {
         std::thread::available_parallelism()
             .map(|n| n.get())

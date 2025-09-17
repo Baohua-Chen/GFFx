@@ -33,7 +33,7 @@ fn bin_of(x: u32, shift: u32) -> u32 {
 /// Arguments for `depth` command
 #[derive(Parser, Debug)]
 #[command(
-    about = "Compute depth across genomic features",
+    about = "Compute coverage depth across genomic features",
     long_about = "This tool computes sequencing depth (number of overlapping regions/reads per feature) \
                   from SAM/BAM/CRAM or BED input. It does not compute breadth/fraction coverage."
 )]

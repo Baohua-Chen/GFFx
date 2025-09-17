@@ -22,6 +22,7 @@ enum Commands {
     Search(SearchArgs),
     Coverage(CoverageArgs),
     Depth(DepthArgs),
+    Sample(SampleArgs)
 }
 
 fn main() -> Result<()> {
@@ -34,6 +35,7 @@ fn main() -> Result<()> {
         Commands::Search(args) => run_search(&args)?,
         Commands::Coverage(args) => run_coverage(&args)?,
         Commands::Depth(args) => run_depth(&args)?,
+        Commands::Sample(args) => run_sample(&args)?,
     }
 
     Ok(())

@@ -1,45 +1,16 @@
 # GFFx Changelog
 
-Release v0.3.2:
-
-## Architectural Optimization
-- Unified the parsing of various index files under a set of independent and consistently designed structures and modules
-## Bug Fixes
-- `-F, --full-model, -F` and `-T, --types` are now conflics with each other. This change ensures consistency with the actual code logic.
-
 ---
 
-Release v0.3.1:
+Release v0.4.0:
 
 ### Changed
-- To avoid short option conflicts in `extract`, renamed:
-  - `-f` (feature id) -> `-e`
-  - `-F` (feature file) -> `-E`
 
----
+Added two useful functionalities: `coverage` for calculating breadth of coverage and `depth` for calculating depth of coverage from BAM/SAM/CRAM or BED files on a GFF file.
 
-Release v0.3.0 is a **major release** of GFFx, introducing important changes to default behavior, performance improvements, and bug fixes.
+Added a `sample` functionality for random downsampling of feature groups from each chromosome at equal ratios.
 
-  ## Breaking Changes
-  - **Default extraction/intersection mode changed**:  
-    Non Full-Model Mode is now the default. To preserve the previous behavior (returning the entire gene model), users must explicitly pass the `-F` / `--full-model` flag.
-    Non Full-Model Mode and Full-Model Mode have **comparable runtime performance**.
-
-  ## New Features
-  - **Non Full-Model Mode for `extract` and `intersect`**  
-    Added support for a new mode where these commands return only the features that directly match the queries, instead of always returning the entire gene model.  
-
-  ## Changes
-  - **Default Behavior Update**  
-    Non Full-Model Mode is now the default (see Breaking Changes).  
-  - **Threading Default Update**  
-    The default number of threads has been changed from 4 to 12 CPU cores to improve the performance under default settings.
-  
-  ## Improvements
-  - Refactored code to increase cohesion and function reusability.  
-
-  ## Bug Fixes
-  - Fixed several minor issues to improve stability and correctness.
+Updated module organization and source code directory layout to conform to the Rust 2024 edition guidelines for module visibility (`pub`) and path imports.
 
 ---
 

@@ -25,7 +25,7 @@ pub struct CommonArgs {
     pub output: Option<PathBuf>,
 
     /// Return the entire feature group for each match (entire-group mode); default: only the matched feature (per-feature mode).
-    #[arg(short = 'F', long = "entire_group", default_value_t = false)]
+    #[arg(short = 'e', long = "entire_group", default_value_t = false)]
     pub entire_group: bool,
 
     /// Comma-separated feature types to retain (e.g. exon,gene); only effective in feature-only mode

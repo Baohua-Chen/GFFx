@@ -29,11 +29,11 @@ pub fn write_binary_u32(path: PathBuf, values: &[u32]) -> Result<()> {
 }
 
 // Writes GFF offset records (gof)
-pub fn write_gof(file: &mut File, id: u32, start: u64, end: u64) -> Result<()> {
-    file.write_u32::<LittleEndian>(id)?;
-    file.write_u32::<LittleEndian>(0)?; // Reserved field
-    file.write_u64::<LittleEndian>(start)?;
-    file.write_u64::<LittleEndian>(end)?;
+pub fn write_gof(file: &mut File, id: u32, seq_num: u32, start: u64, end: u64) -> Result<()> {
+    file.write_u32::<LittleEndian>(id)?; // root feature id
+    file.write_u32::<LittleEndian>(seq_num)?; // seq numeric id
+    file.write_u64::<LittleEndian>(start)?; // start offset in GFF file
+    file.write_u64::<LittleEndian>(end)?; // end offset in GFF file
     Ok(())
 }
 
@@ -150,8 +150,10 @@ pub fn build_index(gff: &PathBuf, attr_key: &str, skip_types: &str, verbose: boo
     let mut atn_entries = Vec::new();
     let mut attr_value_to_id: FxHashMap<String, u32> = FxHashMap::default();
     let mut gof_file = File::create(append_suffix(gff, ".gof"))?;
-    let mut seqid_intervals: IndexMap<String, Vec<(u32, u32, u32)>> = IndexMap::new();
-    let mut current_root: Option<(u32, u64)> = None;
+    let mut seqid_to_num: IndexMap<String, u32> = IndexMap::new();
+    let mut trees_input: IndexMap<u32, Vec<(u32, u32, u32)>> = IndexMap::new();
+    let mut next_seqid_num: u32 = 0;
+    let mut current_root: Option<(u32, u64, u32)> = None;
 
     // Write .fts and build .prt, .a2f, .gof, and seqid intervals
     for rf in &raw_features {
@@ -166,15 +168,23 @@ pub fn build_index(gff: &PathBuf, attr_key: &str, skip_types: &str, verbose: boo
         prt_entries.push(parent_id);
         // Record roots for GOF and intervals
         if parent_id == fid {
-            seqid_intervals
-                .entry(rf.seqid.clone())
+            let seqid_num = *seqid_to_num.entry(rf.seqid.clone()).or_insert_with(|| {
+                let id = next_seqid_num;
+                next_seqid_num += 1;
+                id
+            });
+            
+            trees_input
+                .entry(seqid_num)
                 .or_default()
                 .push((rf.start, rf.end, fid));
-            if let Some((old_id, old_off)) = current_root.take() {
-                write_gof(&mut gof_file, old_id, old_off, rf.line_offset)?;
+    
+            if let Some((old_id, old_off, old_seqid_num)) = current_root.take() {
+                write_gof(&mut gof_file, old_id, old_seqid_num, old_off, rf.line_offset)?;
             }
-            current_root = Some((fid, rf.line_offset));
+            current_root = Some((fid, rf.line_offset, seqid_num));
         }
+        
         // Attribute mapping
         if let Some(val) = &rf.attr {
             let aid = *attr_value_to_id.entry(val.clone()).or_insert_with(|| {
@@ -188,16 +198,14 @@ pub fn build_index(gff: &PathBuf, attr_key: &str, skip_types: &str, verbose: boo
         }
     }
     // Write final GOF record
-    if let Some((last_id, last_off)) = current_root {
-        write_gof(&mut gof_file, last_id, last_off, data.len() as u64)?;
+    if let Some((last_id, last_off, last_seqid_num)) = current_root {
+        write_gof(&mut gof_file, last_id, last_seqid_num, last_off, data.len() as u64)?;
     }
 
     // Build interval trees per seqid
-    let mut seqid_to_num: IndexMap<String, u32> = IndexMap::new();
-    let mut trees = Vec::with_capacity(seqid_intervals.len());
-    for (seqid, ivs) in seqid_intervals.iter() {
-        let num = seqid_to_num.len() as u32;
-        seqid_to_num.insert(seqid.clone(), num);
+    let mut trees = Vec::with_capacity(seqid_to_num.len());
+    for (_seqid, seqid_num) in &seqid_to_num {
+        let ivs = &trees_input[seqid_num];
         let iv_structs: Vec<Interval<_>> = ivs
             .iter()
             .map(|&(start, end, fid)| Interval {

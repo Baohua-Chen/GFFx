@@ -1,18 +1,7 @@
-# GFFx v0.3.2 Release Notes
+# GFFx v0.4.0 Release Notes
 
-Release Note: Architectural Optimization
+Added two useful functionalities: `coverage` for calculating breadth of coverage and `depth` for calculating depth of coverage from BAM/SAM/CRAM or BED files on a GFF file.
 
-In this release, we have unified the parsing of various index files under a set of independent and consistently designed structures/modules, significantly improves maintainability, reliability, and usability of the codebase.
-This architectural refactoring brings several key benefits:
+Added a `sample` functionality for random downsampling of feature groups from each chromosome at equal ratios.
 
-Improved code reuse and cohesion: Common functionality is encapsulated, reducing duplication and making the system easier to maintain.
-
-Greater testability and evolvability: A standardized interface across different index formats enables more robust testing and smoother future extensions.
-
-Lower learning curve: By consolidating parsing logic into a clear and consistent abstraction, the framework becomes more approachable for researchers and developers who want to use or extend GFFx.
-
----
-
-## Bug Fixes
-- Fixed several issues that could cause the search functionality to malfunction in non-full-model mode.
-- Removed modules, functions, and structures that were only useful during development and testing.
+Updated module organization and source code directory layout to conform to the Rust 2024 edition guidelines for module visibility (`pub`) and path imports.
