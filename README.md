@@ -409,10 +409,6 @@ GFFx is released under the MIT or Apache-2.0 License.
 
 ## Citation
 
-If you use **GFFx**, please cite our preprint:
-
-Chen, B., Wu, D., & Zhang, G. (2025).  
-*GFFx: A Rust-based suite of utilities for ultra-fast genomic feature extraction*.  
-bioRxiv 2025.08.08.669426. https://doi.org/10.1101/2025.08.08.669426
-
+If you use **GFFx**, please cite our forthcoming paper in **GigaScience**:
+Chen, B., Wu, D., & Zhang, G. (in press). GFFx: A Rust-based suite of utilities for ultra-fast genomic feature extraction. GigaScience. https://doi.org/10.1093/gigascience/giaf124
 ---
