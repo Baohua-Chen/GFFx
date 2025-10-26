@@ -410,6 +410,7 @@ GFFx is released under the MIT or Apache-2.0 License.
 ## Citation
 
 If you use **GFFx**, please cite our forthcoming paper in *GigaScience*:
+
 Baohua Chen, Dongya Wu, Guojie Zhang, GFFx: A Rust-based suite of utilities for ultra-fast genomic feature extraction, GigaScience, Volume 14, 2025, giaf124, https://doi.org/10.1093/gigascience/giaf124
 
 ---
